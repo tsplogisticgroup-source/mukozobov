@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"C:/Users/imya/Desktop\" -maxdepth 2 -iname \"*.html\" 2>/dev/null | head -20; echo \"---all files in WMS folder---\"; ls -la \"C:/Users/imya/Desktop/WMS для муказа\")",
+      "Bash(npm -v)",
+      "Bash(git --version)",
+      "PowerShell($ErrorActionPreference='SilentlyContinue'; node -v; npm -v; \"---paths---\"; Test-Path \"C:\\\\Program Files\\\\nodejs\\\\node.exe\"; Test-Path \"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\\\\node.exe\"; \"---where---\"; \\(Get-Command node\\).Source)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); \"node: $\\(node -v\\)\"; \"npm:  $\\(npm -v\\)\"; \"git:  $\\(git --version\\)\")",
+      "Bash(mkdir -p src)",
+      "Bash(sed -n '98,4602p' МУКАЗ.html)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; npm install 2>&1 | Select-Object -Last 25)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; \"--- проверка бинарника esbuild ---\"; Test-Path \".\\\\node_modules\\\\@esbuild\\\\win32-x64\\\\esbuild.exe\"; \"--- проверка vite ---\"; Test-Path \".\\\\node_modules\\\\vite\\\\bin\\\\vite.js\")",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; npm run dev)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); $log=\"C:\\\\Users\\\\imya\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-imya-Desktop-WMS-----------\\\\ab3a9e0e-f6f0-4649-bc5a-1b93a1a7a1b9\\\\tasks\\\\benxr157v.output\"; $deadline=\\(Get-Date\\).AddSeconds\\(20\\); while\\(\\(Get-Date\\) -lt $deadline\\){ if\\(Test-Path $log\\){ if\\(Select-String -Path $log -Pattern \"Local:|ready in|error\" -Quiet\\){ break } } Start-Sleep -Milliseconds 500 }; \"=== вывод vite ===\"; Get-Content $log)",
+      "mcp__Claude_Preview__preview_start",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; \"killed $\\($_.ProcessId\\)\" } catch {} })",
+      "PowerShell(\"waited\")",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 5173 -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue)",
+      "PowerShell(\"=== listening 5173 ===\")",
+      "PowerShell(\"=== node procs ===\")",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; Start-Process -FilePath \"C:\\\\Program Files\\\\nodejs\\\\node.exe\" -ArgumentList \"node_modules/vite/bin/vite.js\",\"--host\",\"127.0.0.1\",\"--port\",\"5174\" -RedirectStandardOutput \"vite.out.log\" -RedirectStandardError \"vite.err.log\" -WindowStyle Hidden; \"started\")",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 5174 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; \"5174 stopped\")",
+      "PowerShell(\"warmed\")"
+    ]
+  }
+}
