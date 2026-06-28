@@ -1247,6 +1247,12 @@ function SkladLedger() {
             let qtyCol = headers.findIndex(h => h.includes('получено') && h.includes('итого') && !h.includes('поставщика') && !h.includes('других') && !h.includes('отгруж') && !h.includes('брак') && !h.includes('чз'));
             if (qtyCol === -1) qtyCol = headers.findIndex(h => h.includes('получено') && h.includes('итого') && !h.includes('отгруж') && !h.includes('брак'));
             if (artCol === -1 || sizeCol === -1 || barcodeCol === -1 || qtyCol === -1) continue;
+            // Запасное название = категория из имени листа («УЧЕТ - Лоферы» -> «Лоферы»).
+            // Нужно для артикулов, которых нет в листе «Товары поставки» (у них нет описания).
+            const sheetCategory = sheetName.replace(/^\s*уч[её]т\s*[-–—:]*\s*/i, '').trim();
+            const catName = sheetCategory
+              ? sheetCategory.charAt(0).toUpperCase() + sheetCategory.slice(1).toLowerCase()
+              : '';
             let lastArt = null;
             for (let i = headerIdx + 1; i < rows.length; i++) {
               const row = rows[i];
@@ -1270,7 +1276,7 @@ function SkladLedger() {
               if (!parsed[code]) {
                 parsed[code] = {
                   code,
-                  name: meta.name || '',
+                  name: meta.name || catName,
                   color: meta.color || color.charAt(0).toUpperCase() + color.slice(1),
                   sizes: []
                 };
@@ -1372,41 +1378,44 @@ function SkladLedger() {
         const TEXT_START_Y = mmToPx(1.5); // отступ сверху
         const TEXT_END_Y = mmToPx(19.5); // нижняя граница текста
         const TEXT_H = TEXT_END_Y - TEXT_START_Y;
-        const rows = [{
-          label: 'name',
-          pt: 8.0
-        }, {
-          label: 'art',
-          pt: 6.5
-        }, {
-          label: 'size',
-          pt: 9.3
-        }, {
-          label: 'color',
-          pt: 6.0
-        }, {
-          label: 'brand',
-          pt: 6.0
-        }, {
-          label: 'ip',
-          pt: 6.0
-        }];
+        const rowDefs = [
+          { label: 'name', pt: 8.0 },
+          { label: 'art', pt: 6.5 },
+          { label: 'size', pt: 9.3 },
+          { label: 'color', pt: 6.0 },
+          { label: 'brand', pt: 6.0 },
+          { label: 'ip', pt: 6.0 },
+        ];
+        const textFor = lbl => {
+          if (lbl === 'name') return name || artCode;
+          if (lbl === 'art') return `Артикул: ${artCode}`;
+          if (lbl === 'size') return `Размер: ${size}`;
+          if (lbl === 'color') return color ? `Цвет: ${color}` : '';
+          if (lbl === 'brand') return 'Бренд: НОСИМ СУТКАМИ';
+          if (lbl === 'ip') return 'ИП: Мукозобов Д.В.';
+          return '';
+        };
+        // Пустые строки (например «Цвет», если цвета нет) убираем — иначе кривые отступы.
+        const rows = rowDefs.filter(r => textFor(r.label) !== '');
         const rowH = pt => pt * PT; // полная высота строки в пикселях
         const totalH = rows.reduce((s, r) => s + rowH(r.pt), 0);
-        const gap = (TEXT_H - totalH) / (rows.length - 1);
+        const gap = rows.length > 1 ? (TEXT_H - totalH) / (rows.length - 1) : 0;
+        const maxW = LW_px - ML * 2;
         let y = TEXT_START_Y;
         for (const r of rows) {
-          const pxSize = Math.round(r.pt * PT);
-          ctx.font = `bold ${pxSize}px Arial`;
-          let text = '';
-          if (r.label === 'name') text = name || artCode;
-          if (r.label === 'art') text = `Артикул: ${artCode}`;
-          if (r.label === 'size') text = `Размер: ${size}`;
-          if (r.label === 'color') text = `Цвет: ${color}`;
-          if (r.label === 'brand') text = 'Бренд: НОСИМ СУТКАМИ';
-          if (r.label === 'ip') text = 'ИП: Мукозобов Д.В.';
-          const maxW = LW_px - ML * 2;
-          while (ctx.measureText(text).width > maxW && text.length > 3) text = text.slice(0, -1);
+          let pt = r.pt;
+          let text = textFor(r.label);
+          ctx.font = `bold ${Math.round(pt * PT)}px Arial`;
+          // Длинное название: сначала уменьшаем шрифт, чтобы влезло целиком.
+          while (ctx.measureText(text).width > maxW && pt > 4.5) {
+            pt -= 0.3;
+            ctx.font = `bold ${Math.round(pt * PT)}px Arial`;
+          }
+          // Если даже на минимальном шрифте не влезает — аккуратно обрезаем с многоточием.
+          if (ctx.measureText(text).width > maxW) {
+            while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1);
+            text += '…';
+          }
           const textY = y + rowH(r.pt); // baseline = top + height
           if (r.label === 'name') ctx.fillText(text, (LW_px - ctx.measureText(text).width) / 2, textY);else ctx.fillText(text, ML, textY);
           y += rowH(r.pt) + gap;

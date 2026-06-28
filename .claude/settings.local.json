@@ -37,7 +37,10 @@
       "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Защита доступа: вход по логину \\(Supabase Auth\\)' -m '- Подключён @supabase/supabase-js, клиент с сохранением сессии' -m '- storage переведён на запросы от вошедшего пользователя' -m '- Добавлен экран входа \\(src/auth-gate.jsx\\), кнопка выхода' -m '- app.js отдаёт SkladLedger наружу, рендер через AuthGate в main.jsx' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
       "Bash(echo \"=== Запрос без входа \\(роль anon\\) ===\")",
       "Bash(curl -s -w '\\\\nHTTP: %{http_code}\\\\n' -H 'apikey: sb_publishable_3PkNY-h8Mc_xLYRbOwX7XQ_2HAsEBWf' -H 'Authorization: Bearer sb_publishable_3PkNY-h8Mc_xLYRbOwX7XQ_2HAsEBWf' 'https://rcnadtsjjnsprbntsrtm.supabase.co/rest/v1/sklad_kv?select=key&limit=3')",
-      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Вход: показывать понятную причину ошибки от Supabase' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Вход: показывать понятную причину ошибки от Supabase' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
+      "Bash(\"C:/Program Files/nodejs/node.exe\" _inspect.cjs)",
+      "Bash(rm -f _inspect.cjs vite.out.log vite.err.log)",
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Этикетки: чинить слетающее наименование товара' -m 'Причина: у 143 из 168 артикулов нет описания в листе «Товары поставки»,' -m 'поэтому на этикетку падал голый артикул.' -m '- Запасное название = категория из имени листа УЧЕТ \\(Кеды/Лоферы/...\\)' -m '- Длинные названия ужимаются по шрифту, а не обрезаются на полуслове' -m '- Пустая строка «Цвет:» не печатается, если цвета нет' -m 'Проверено на реальном файле: наименование теперь есть у всех артикулов.' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }
