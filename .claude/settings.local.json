@@ -34,7 +34,10 @@
       "Bash(curl -s \"http://127.0.0.1:5173/src/config.js\")",
       "Bash(curl -s \"http://127.0.0.1:5173/src/app.js\")",
       "Bash(git add *)",
-      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Защита доступа: вход по логину \\(Supabase Auth\\)' -m '- Подключён @supabase/supabase-js, клиент с сохранением сессии' -m '- storage переведён на запросы от вошедшего пользователя' -m '- Добавлен экран входа \\(src/auth-gate.jsx\\), кнопка выхода' -m '- app.js отдаёт SkladLedger наружу, рендер через AuthGate в main.jsx' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Защита доступа: вход по логину \\(Supabase Auth\\)' -m '- Подключён @supabase/supabase-js, клиент с сохранением сессии' -m '- storage переведён на запросы от вошедшего пользователя' -m '- Добавлен экран входа \\(src/auth-gate.jsx\\), кнопка выхода' -m '- app.js отдаёт SkladLedger наружу, рендер через AuthGate в main.jsx' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
+      "Bash(echo \"=== Запрос без входа \\(роль anon\\) ===\")",
+      "Bash(curl -s -w '\\\\nHTTP: %{http_code}\\\\n' -H 'apikey: sb_publishable_3PkNY-h8Mc_xLYRbOwX7XQ_2HAsEBWf' -H 'Authorization: Bearer sb_publishable_3PkNY-h8Mc_xLYRbOwX7XQ_2HAsEBWf' 'https://rcnadtsjjnsprbntsrtm.supabase.co/rest/v1/sklad_kv?select=key&limit=3')",
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Вход: показывать понятную причину ошибки от Supabase' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

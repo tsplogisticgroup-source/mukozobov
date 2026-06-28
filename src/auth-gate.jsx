@@ -24,7 +24,17 @@ export default function AuthGate({ children }) {
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
-    if (error) setError('Неверный логин или пароль');
+    if (error) {
+      // Показываем настоящую причину от Supabase — помогает понять, что не так.
+      const m = error.message || '';
+      if (/Invalid login credentials/i.test(m)) {
+        setError('Неверный логин или пароль (или аккаунт ещё не создан в Supabase)');
+      } else if (/Email not confirmed/i.test(m)) {
+        setError('Аккаунт не подтверждён. В Supabase включите Auto Confirm для пользователя.');
+      } else {
+        setError(m);
+      }
+    }
   }
 
   // Ещё проверяем сохранённую сессию — ничего не мигаем.
