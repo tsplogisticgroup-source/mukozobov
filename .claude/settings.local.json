@@ -28,7 +28,13 @@
       "Bash(cat C:/Users/imya/.claude/projects/C--Users-imya-Desktop-WMS-----------/memory/MEMORY.md)",
       "Bash(echo \"MISSING\")",
       "PowerShell(\"=== �� ��蠥� 5173 ===\")",
-      "PowerShell(\"=== node ������ ===\")"
+      "PowerShell(\"=== node ������ ===\")",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; npm install @supabase/supabase-js 2>&1 | Select-Object -Last 6)",
+      "Bash(curl -s \"http://127.0.0.1:5173/src/main.jsx\")",
+      "Bash(curl -s \"http://127.0.0.1:5173/src/config.js\")",
+      "Bash(curl -s \"http://127.0.0.1:5173/src/app.js\")",
+      "Bash(git add *)",
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Защита доступа: вход по логину \\(Supabase Auth\\)' -m '- Подключён @supabase/supabase-js, клиент с сохранением сессии' -m '- storage переведён на запросы от вошедшего пользователя' -m '- Добавлен экран входа \\(src/auth-gate.jsx\\), кнопка выхода' -m '- app.js отдаёт SkladLedger наружу, рендер через AuthGate в main.jsx' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

@@ -4501,5 +4501,7 @@ function SkladLedger() {
     }
   }, "Данные хранятся в общей базе — доступны с любого устройства всем, у кого есть ссылка на этот сайт.")));
 }
-ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(SkladLedger, null));
+// Раньше здесь был запуск приложения. Теперь компонент отдаём наружу —
+// его рендерит main.jsx через «ворота» входа (AuthGate).
+window.SkladLedger = SkladLedger;
 
