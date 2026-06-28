@@ -738,15 +738,16 @@ function SkladLedger() {
   });
   const [darkMode, setDarkMode] = useState(() => {
     try {
-      return localStorage.getItem('sklad_theme') === 'dark';
+      // «Полночь» — тёмная тема по умолчанию (светлая только если выбрана явно).
+      return localStorage.getItem('sklad_theme') !== 'light';
     } catch (_unused2) {
-      return false;
+      return true;
     }
   });
   useEffect(() => {
     try {
       localStorage.setItem('sklad_theme', darkMode ? 'dark' : 'light');
-      document.body.style.background = darkMode ? '#1E1A16' : '#F6F1E7';
+      document.body.style.background = darkMode ? '#14131C' : '#F3F4FB';
     } catch (_unused3) {}
   }, [darkMode]);
   const [activeTab, setActiveTab] = useState('main');
@@ -2079,36 +2080,44 @@ function SkladLedger() {
   }
   return /*#__PURE__*/React.createElement("div", {
     style: _objectSpread(_objectSpread({}, darkMode ? {
-      '--paper': '#1E1A16',
-      '--card': '#2A2420',
-      '--ink': '#F0E9DD',
-      '--ink-soft': '#9C9186',
-      '--line': '#3D362F',
-      '--accent': '#E07A3E',
-      '--accent-soft': '#4A2E1C',
-      '--positive': '#6FAE8B',
-      '--positive-soft': '#1F3329',
-      '--negative': '#E0786D',
-      '--negative-soft': '#3A211D',
-      '--warn': '#E0BB5A',
-      '--warn-soft': '#3A2F14',
-      '--row-hover': '#332B24',
-      '--input-bg': '#221D19'
+      // «Полночь» — тёмный фон, фиолетовый акцент
+      '--paper': '#14131C',
+      '--card': '#1E1D2B',
+      '--card-2': '#26243A',
+      '--ink': '#EDEBF5',
+      '--ink-soft': '#8E8AAE',
+      '--line': '#2E2C40',
+      '--accent': '#7C5CFF',
+      '--accent-soft': '#2C2547',
+      '--positive': '#34E0A1',
+      '--positive-soft': '#16332B',
+      '--negative': '#FF6B6B',
+      '--negative-soft': '#3A1E22',
+      '--warn': '#F0B968',
+      '--warn-soft': '#3A2E18',
+      '--info': '#5FA8E0',
+      '--info-soft': '#1B2C3A',
+      '--row-hover': '#26243A',
+      '--input-bg': '#181724'
     } : {
-      '--paper': '#F6F1E7',
+      // Светлая тема в той же фиолетовой гамме (индиго)
+      '--paper': '#F3F4FB',
       '--card': '#FFFFFF',
-      '--ink': '#2B2520',
-      '--ink-soft': '#8A8073',
-      '--line': '#E1D7C6',
-      '--accent': '#C9551A',
-      '--accent-soft': '#F5DECB',
-      '--positive': '#3D6E52',
-      '--positive-soft': '#DCEAE1',
-      '--negative': '#A8392E',
-      '--negative-soft': '#F4DAD3',
+      '--card-2': '#F6F6FC',
+      '--ink': '#1B1B2E',
+      '--ink-soft': '#6E708A',
+      '--line': '#E6E8F4',
+      '--accent': '#4F46E5',
+      '--accent-soft': '#ECEBFB',
+      '--positive': '#1FA875',
+      '--positive-soft': '#E2F3EC',
+      '--negative': '#D14366',
+      '--negative-soft': '#FBE5EA',
       '--warn': '#B5870A',
-      '--warn-soft': '#F6ECCB',
-      '--row-hover': '#FBF8F2',
+      '--warn-soft': '#F7EDD0',
+      '--info': '#3F5B73',
+      '--info-soft': '#E5ECF2',
+      '--row-hover': '#F7F7FC',
       '--input-bg': '#FFFFFF'
     }), {}, {
       fontFamily: "'Inter', sans-serif",
@@ -2119,35 +2128,52 @@ function SkladLedger() {
       boxSizing: 'border-box'
     })
   }, /*#__PURE__*/React.createElement("style", null, `
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap');
         .skl-mono { font-family: 'JetBrains Mono', monospace; }
-        .skl-display { font-family: 'Space Grotesk', sans-serif; }
+        .skl-display { font-family: 'Space Grotesk', sans-serif; letter-spacing: -0.01em; }
         .skl-stamp {
-          display: inline-block; padding: 2px 10px; border: 1.5px dashed currentColor;
-          border-radius: 4px; font-family: 'Space Grotesk', sans-serif; font-size: 11px;
-          font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-          transform: rotate(-2deg);
+          display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+          border-radius: 8px; font-family: 'Space Grotesk', sans-serif; font-size: 11px;
+          font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+          background: var(--accent-soft); color: var(--accent);
         }
+        .skl-row { transition: background .12s ease; }
         .skl-row:hover { background: var(--row-hover); }
         .skl-input {
-          font-family: 'Inter', sans-serif; border: 1px solid var(--line); border-radius: 6px;
-          padding: 8px 10px; font-size: 14px; background: var(--input-bg); color: var(--ink); width: 100%;
-          box-sizing: border-box;
+          font-family: 'Inter', sans-serif; border: 1px solid var(--line); border-radius: 9px;
+          padding: 9px 12px; font-size: 14px; background: var(--input-bg); color: var(--ink); width: 100%;
+          box-sizing: border-box; transition: border-color .15s ease, box-shadow .15s ease;
         }
-        .skl-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+        .skl-input::placeholder { color: var(--ink-soft); }
+        .skl-input:focus {
+          outline: none; border-color: var(--accent);
+          box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+        }
         .skl-btn {
-          font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 13px;
-          letter-spacing: 0.03em; border-radius: 6px; padding: 9px 16px; cursor: pointer;
-          border: none; display: inline-flex; align-items: center; gap: 6px;
+          font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 13px;
+          letter-spacing: 0.01em; border-radius: 9px; padding: 9px 15px; cursor: pointer;
+          border: none; display: inline-flex; align-items: center; gap: 7px;
+          transition: transform .08s ease, background .15s ease, border-color .15s ease, filter .15s ease;
         }
-        .skl-btn-primary { background: var(--accent); color: #fff; }
-        .skl-btn-primary:hover { background: #B04812; }
+        .skl-btn:active { transform: scale(0.97); }
+        .skl-btn-primary { background: var(--accent); color: #fff; box-shadow: 0 4px 14px -4px var(--accent); }
+        .skl-btn-primary:hover { filter: brightness(1.1); }
         .skl-btn-ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
-        .skl-btn-ghost:hover { background: var(--card); }
+        .skl-btn-ghost:hover { background: var(--card-2); border-color: var(--accent); }
         .skl-card {
-          background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px;
+          background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px;
+          transition: border-color .15s ease, transform .15s ease;
         }
-        .skl-divider { border: none; border-top: 1px dashed var(--line); margin: 20px 0; }
+        .skl-iconchip {
+          width: 34px; height: 34px; border-radius: 10px; display: inline-flex;
+          align-items: center; justify-content: center; flex: none;
+        }
+        .skl-logo {
+          width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center;
+          justify-content: center; color: #fff; background: var(--accent);
+          box-shadow: 0 6px 18px -5px var(--accent);
+        }
+        .skl-divider { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
         @keyframes spin { to { transform: rotate(360deg); } }
 
         .skl-label-sheet { display: none; }
@@ -2285,7 +2311,11 @@ function SkladLedger() {
       gap: 12,
       marginBottom: 6
     }
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', alignItems: 'center', gap: 13 }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "skl-logo"
+  }, /*#__PURE__*/React.createElement(Box, { size: 24 })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: 'var(--ink-soft)',
@@ -2305,7 +2335,7 @@ function SkladLedger() {
       color: 'var(--ink-soft)',
       marginTop: 2
     }
-  }, "ИП Мукозобов Д.В.")), /*#__PURE__*/React.createElement("div", {
+  }, "ИП Мукозобов Д.В."))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 10,
@@ -2384,82 +2414,86 @@ function SkladLedger() {
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-      gap: 12,
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: 11,
       marginBottom: 20
     }
   }, [{
     label: 'Артикулов',
     value: totals.sku,
+    tone: 'accent',
     icon: /*#__PURE__*/React.createElement(Search, {
-      size: 16
+      size: 17
     })
   }, {
     label: 'Приход всего',
     value: totals.income,
+    tone: 'positive',
     icon: /*#__PURE__*/React.createElement(Box, {
-      size: 16
+      size: 17
     })
   }, {
     label: 'Брак всего',
     value: totals.defect,
+    tone: 'negative',
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
-      size: 16
-    }),
-    warn: true
-  }, {
-    label: 'Фотостудия всего',
-    value: totals.photo,
-    icon: /*#__PURE__*/React.createElement(Camera, {
-      size: 16
+      size: 17
     })
   }, {
-    label: 'Неопознано всего',
+    label: 'Фотостудия',
+    value: totals.photo,
+    tone: 'info',
+    icon: /*#__PURE__*/React.createElement(Camera, {
+      size: 17
+    })
+  }, {
+    label: 'Неопознано',
     value: totals.unidentified,
+    tone: 'warn',
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
-      size: 16
-    }),
-    warn: true
+      size: 17
+    })
   }, {
     label: 'Отгружено всего',
     value: totals.shipped,
+    tone: 'positive',
     icon: /*#__PURE__*/React.createElement(Upload, {
-      size: 16
+      size: 17
     })
   }, {
-    label: 'Остаток всего',
+    label: 'Остаток на складе',
     value: totals.balance,
+    tone: 'accent',
+    highlight: true,
     icon: /*#__PURE__*/React.createElement(Download, {
-      size: 16
+      size: 17
     })
   }].map((s, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     className: "skl-card",
     style: {
-      textAlign: 'center',
-      padding: '14px 8px'
+      padding: '15px 16px',
+      borderColor: s.highlight ? 'var(--accent)' : 'var(--line)'
     }
   }, /*#__PURE__*/React.createElement("div", {
+    className: "skl-iconchip",
     style: {
-      display: 'flex',
-      justifyContent: 'center',
-      marginBottom: 6,
-      color: s.warn && s.value > 0 ? 'var(--negative)' : 'var(--ink-soft)'
+      background: `var(--${s.tone}-soft)`,
+      color: `var(--${s.tone})`
     }
   }, s.icon), /*#__PURE__*/React.createElement("div", {
-    className: "skl-mono",
+    className: "skl-display",
     style: {
-      fontSize: 28,
+      fontSize: 27,
       fontWeight: 700,
-      color: s.warn && s.value > 0 ? 'var(--negative)' : 'var(--ink)'
+      marginTop: 11,
+      color: s.highlight ? 'var(--accent)' : 'var(--ink)'
     }
   }, s.value), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 12,
+      fontSize: 12.5,
       color: 'var(--ink-soft)',
-      textTransform: 'uppercase',
-      letterSpacing: '0.06em',
-      marginTop: 4
+      marginTop: 3
     }
   }, s.label)))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4508,7 +4542,7 @@ function SkladLedger() {
       color: 'var(--ink-soft)',
       textAlign: 'center'
     }
-  }, "Данные хранятся в общей базе — доступны с любого устройства всем, у кого есть ссылка на этот сайт.")));
+  }, "Данные хранятся в защищённой облачной базе — доступны после входа с любого устройства.")));
 }
 // Раньше здесь был запуск приложения. Теперь компонент отдаём наружу —
 // его рендерит main.jsx через «ворота» входа (AuthGate).

@@ -11,9 +11,7 @@ export default function AuthGate({ children }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Проверяем сохранённую сессию при загрузке.
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    // Подписываемся на вход/выход, чтобы экран сам переключался.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
     return () => sub.subscription.unsubscribe();
   }, []);
@@ -25,7 +23,6 @@ export default function AuthGate({ children }) {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) {
-      // Показываем настоящую причину от Supabase — помогает понять, что не так.
       const m = error.message || '';
       if (/Invalid login credentials/i.test(m)) {
         setError('Неверный логин или пароль (или аккаунт ещё не создан в Supabase)');
@@ -37,10 +34,10 @@ export default function AuthGate({ children }) {
     }
   }
 
-  // Ещё проверяем сохранённую сессию — ничего не мигаем.
-  if (session === undefined) return null;
+  if (session === undefined) {
+    return <div style={{ minHeight: '100vh', background: '#14131C' }} />;
+  }
 
-  // Вошёл — показываем приложение и маленькую кнопку «Выйти» в углу.
   if (session) {
     return (
       <>
@@ -49,10 +46,10 @@ export default function AuthGate({ children }) {
           onClick={() => supabase.auth.signOut()}
           title="Выйти"
           style={{
-            position: 'fixed', top: 10, right: 12, zIndex: 9999,
-            background: '#fff', border: '1px solid #ddd', borderRadius: 8,
-            padding: '6px 12px', fontSize: 13, cursor: 'pointer', color: '#444',
-            boxShadow: '0 1px 3px rgba(0,0,0,.08)',
+            position: 'fixed', top: 12, right: 14, zIndex: 9999,
+            background: '#1E1D2B', border: '1px solid #2E2C40', borderRadius: 9,
+            padding: '7px 13px', fontSize: 13, cursor: 'pointer', color: '#C7C3DE',
+            fontFamily: "'Space Grotesk', system-ui, sans-serif", fontWeight: 600,
           }}
         >
           Выйти
@@ -61,46 +58,48 @@ export default function AuthGate({ children }) {
     );
   }
 
-  // Не вошёл — форма входа.
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: '#F6F1E7',
-      fontFamily: 'system-ui, -apple-system, Segoe UI, Arial, sans-serif',
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#14131C', padding: 20, boxSizing: 'border-box',
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
     }}>
       <form onSubmit={handleLogin} style={{
-        background: '#fff', padding: 32, borderRadius: 16, width: 320,
-        boxShadow: '0 8px 30px rgba(0,0,0,.1)',
+        background: '#1E1D2B', padding: 34, borderRadius: 18, width: 340,
+        border: '1px solid #2E2C40', boxShadow: '0 24px 60px -20px rgba(0,0,0,.6)',
+        boxSizing: 'border-box',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           <div style={{
-            width: 36, height: 36, borderRadius: 9, background: '#C9551A',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700,
+            width: 44, height: 44, borderRadius: 13, background: '#7C5CFF',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+            fontWeight: 700, fontSize: 22, boxShadow: '0 8px 22px -6px #7C5CFF',
+            fontFamily: "'Space Grotesk', sans-serif",
           }}>С</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#222' }}>Склад · вход</div>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#EDEBF5', fontFamily: "'Space Grotesk', sans-serif" }}>Склад</div>
+            <div style={{ fontSize: 12.5, color: '#8E8AAE' }}>НОСИМ СУТКАМИ · вход</div>
+          </div>
         </div>
 
-        <label style={{ fontSize: 13, color: '#666' }}>Логин (email)</label>
-        <input
-          type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-          autoComplete="username" required
-          style={inputStyle}
-        />
+        <div style={{ height: 22 }} />
 
-        <label style={{ fontSize: 13, color: '#666' }}>Пароль</label>
-        <input
-          type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-          autoComplete="current-password" required
-          style={inputStyle}
-        />
+        <label style={labelStyle}>Логин (email)</label>
+        <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+          autoComplete="username" required style={inputStyle} />
 
-        {error && <div style={{ color: '#c0392b', fontSize: 13, marginBottom: 12 }}>{error}</div>}
+        <label style={labelStyle}>Пароль</label>
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+          autoComplete="current-password" required style={inputStyle} />
+
+        {error && <div style={{ color: '#FF8B8B', fontSize: 13, marginBottom: 14 }}>{error}</div>}
 
         <button type="submit" disabled={loading} style={{
-          width: '100%', padding: '11px 0', border: 'none', borderRadius: 9,
-          background: '#C9551A', color: '#fff', fontSize: 15, fontWeight: 600,
+          width: '100%', padding: '12px 0', border: 'none', borderRadius: 11,
+          background: '#7C5CFF', color: '#fff', fontSize: 15, fontWeight: 600,
+          fontFamily: "'Space Grotesk', sans-serif",
           cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.7 : 1,
+          boxShadow: '0 8px 22px -8px #7C5CFF',
         }}>
           {loading ? 'Вход…' : 'Войти'}
         </button>
@@ -109,7 +108,9 @@ export default function AuthGate({ children }) {
   );
 }
 
+const labelStyle = { fontSize: 13, color: '#8E8AAE', display: 'block', marginBottom: 5 };
 const inputStyle = {
-  width: '100%', boxSizing: 'border-box', padding: '10px 12px', marginTop: 4,
-  marginBottom: 16, border: '1px solid #ddd', borderRadius: 9, fontSize: 14,
+  width: '100%', boxSizing: 'border-box', padding: '11px 13px', marginBottom: 16,
+  border: '1px solid #2E2C40', borderRadius: 10, fontSize: 14,
+  background: '#181724', color: '#EDEBF5', outline: 'none',
 };
