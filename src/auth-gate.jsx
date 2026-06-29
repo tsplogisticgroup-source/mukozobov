@@ -48,23 +48,7 @@ export default function AuthGate({ children }) {
         if (localStorage.getItem('sklad_role') !== accRole) localStorage.setItem('sklad_role', accRole);
       } catch (_) {}
     }
-    return (
-      <>
-        {children}
-        <button
-          onClick={() => supabase.auth.signOut()}
-          title="Выйти"
-          style={{
-            position: 'fixed', top: 12, right: 14, zIndex: 9999,
-            background: '#1E1D2B', border: '1px solid #2E2C40', borderRadius: 9,
-            padding: '7px 13px', fontSize: 13, cursor: 'pointer', color: '#C7C3DE',
-            fontFamily: "'Space Grotesk', system-ui, sans-serif", fontWeight: 600,
-          }}
-        >
-          Выйти
-        </button>
-      </>
-    );
+    return children;
   }
 
   return (

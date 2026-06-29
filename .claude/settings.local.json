@@ -45,7 +45,10 @@
       "mcp__visualize__show_widget",
       "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Роли: привязка к аккаунту вместо ручного выбора' -m '- AuthGate берёт роль из метаданных пользователя Supabase и проставляет sklad_role' -m '- Экран ручного выбора роли больше не нужен \\(роль = аккаунт\\)' -m '- Кнопка «Сменить роль» -> «Сменить аккаунт» \\(выход и вход под другим логином\\)' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://127.0.0.1:5173/src/auth-gate.jsx\")",
-      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Роли: убрать временную диагностику входа из консоли' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Роли: убрать временную диагностику входа из консоли' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
+      "Bash(\"C:/Program Files/nodejs/node.exe\" --check src/app.js)",
+      "Bash(curl -s -o /dev/null -w \"app.js: %{http_code}\\\\n\" \"http://127.0.0.1:5173/src/app.js\")",
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Дизайн: боковое меню, тонкий топбар, страница-дашборд с графиками' -m '- Навигация вынесена в фиксированный сайдбар \\(логотип, разделы, карточка пользователя, выход\\)' -m '- Топбар: динамический заголовок, бейдж роли, иконки, меню «...» \\(копии данных, сброс\\), Экспорт' -m '- Новая стартовая страница «Дашборд»: метрики + график движения, кольцо структуры, топ артикулов, лента операций' -m '- Анимации: ховер карточек/меню, выпадающее меню; адаптив для мобильных' -m '- Графики строятся на реальных данных склада' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

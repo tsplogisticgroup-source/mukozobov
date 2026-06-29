@@ -750,7 +750,8 @@ function SkladLedger() {
       document.body.style.background = darkMode ? '#14131C' : '#F3F4FB';
     } catch (_unused3) {}
   }, [darkMode]);
-  const [activeTab, setActiveTab] = useState('main');
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [menuOpen, setMenuOpen] = useState(false);
   function chooseRole(r) {
     try {
       localStorage.setItem('sklad_role', r);
@@ -2078,7 +2079,111 @@ function SkladLedger() {
     }));
     return [...ins, ...outs, ...defs, ...phs].sort((a, b) => a.date < b.date ? 1 : -1);
   }
+  // ---- данные для дашборда ----
+  const dashTop = useMemo(() => [...summary].sort((a, b) => b.balance - a.balance).slice(0, 6), [summary]);
+  const dashWeekly = useMemo(() => {
+    const weeks = 8, msWeek = 7 * 24 * 3600 * 1000;
+    const start = Date.now() - (weeks - 1) * msWeek;
+    const buckets = Array.from({ length: weeks }, () => ({ inc: 0, shp: 0 }));
+    const put = (arr, key) => arr.forEach(x => {
+      const t = new Date(x.date).getTime();
+      if (isNaN(t)) return;
+      const i = Math.floor((t - start) / msWeek);
+      if (i >= 0 && i < weeks) buckets[i][key] += x.qty || 0;
+    });
+    put(incomes, 'inc'); put(shipments, 'shp');
+    return buckets;
+  }, [incomes, shipments]);
+  const dashChart = useMemo(() => {
+    const W = 330, H = 120, pad = 8, n = dashWeekly.length;
+    const max = Math.max(1, ...dashWeekly.map(b => b.inc), ...dashWeekly.map(b => b.shp));
+    const X = i => pad + (W - 2 * pad) * (n <= 1 ? 0 : i / (n - 1));
+    const Y = v => H - 8 - (H - 34) * (v / max);
+    const ln = key => dashWeekly.map((b, i) => `${X(i).toFixed(1)},${Y(b[key]).toFixed(1)}`).join(' ');
+    const inc = ln('inc'), shp = ln('shp');
+    const area = `${inc} ${X(n - 1).toFixed(1)},${H - 2} ${X(0).toFixed(1)},${H - 2}`;
+    return { inc, shp, area, empty: max <= 1 };
+  }, [dashWeekly]);
+  const dashDonut = useMemo(() => {
+    const b = Math.max(0, totals.balance), s = Math.max(0, totals.shipped), d = Math.max(0, totals.defect);
+    const sum = b + s + d || 1, C = 251.3, seg = v => (v / sum) * C;
+    return { segB: seg(b), segS: seg(s), segD: seg(d),
+      pctB: Math.round(b / sum * 100), pctS: Math.round(s / sum * 100), pctD: Math.round(d / sum * 100) };
+  }, [totals]);
+  const maxBalance = Math.max(1, ...dashTop.map(a => a.balance));
+  const svgIcon = children => /*#__PURE__*/React.createElement("svg", {
+    width: 17, height: 17, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+    strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round"
+  }, children);
+  const navItems = [
+    { key: 'dashboard', label: 'Дашборд', icon: svgIcon([
+      /*#__PURE__*/React.createElement("rect", { key: 1, x: 3, y: 3, width: 7, height: 9, rx: 1 }),
+      /*#__PURE__*/React.createElement("rect", { key: 2, x: 14, y: 3, width: 7, height: 5, rx: 1 }),
+      /*#__PURE__*/React.createElement("rect", { key: 3, x: 14, y: 12, width: 7, height: 9, rx: 1 }),
+      /*#__PURE__*/React.createElement("rect", { key: 4, x: 3, y: 16, width: 7, height: 5, rx: 1 }) ]) },
+    { key: 'main', label: 'Остатки', icon: /*#__PURE__*/React.createElement(Box, { size: 17 }) },
+    { key: 'ops', label: 'Операции', icon: /*#__PURE__*/React.createElement(Upload, { size: 17 }) },
+    { key: 'tz', label: 'ТЗ на отгрузку', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 17 }) },
+    ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }] : []),
+    { key: 'reports', label: 'Отчёты', icon: svgIcon([
+      /*#__PURE__*/React.createElement("path", { key: 1, d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }),
+      /*#__PURE__*/React.createElement("polyline", { key: 2, points: "14 2 14 8 20 8" }),
+      /*#__PURE__*/React.createElement("line", { key: 3, x1: 16, y1: 13, x2: 8, y2: 13 }),
+      /*#__PURE__*/React.createElement("line", { key: 4, x1: 16, y1: 17, x2: 8, y2: 17 }) ]) },
+  ];
+  const pageTitle = (navItems.find(n => n.key === activeTab) || navItems[0]).label;
+  const dot = c => /*#__PURE__*/React.createElement("span", { style: { color: c } }, "● ");
+  const dashboardCharts = /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 13, marginBottom: 13 } },
+      /*#__PURE__*/React.createElement("div", { className: "skl-card" },
+        /*#__PURE__*/React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+          /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600 } }, "Движение за 8 недель"),
+          /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 12, fontSize: 11, color: 'var(--ink-soft)' } },
+            /*#__PURE__*/React.createElement("span", null, dot('var(--accent)'), "Приход"),
+            /*#__PURE__*/React.createElement("span", null, dot('var(--positive)'), "Отгрузка"))),
+        dashChart.empty
+          ? /*#__PURE__*/React.createElement("div", { style: { height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-soft)', fontSize: 13 } }, "Пока нет данных для графика")
+          : /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 330 120", style: { width: '100%', height: 'auto' } },
+              /*#__PURE__*/React.createElement("line", { x1: 0, y1: 30, x2: 330, y2: 30, stroke: "var(--line)", strokeWidth: 1 }),
+              /*#__PURE__*/React.createElement("line", { x1: 0, y1: 60, x2: 330, y2: 60, stroke: "var(--line)", strokeWidth: 1 }),
+              /*#__PURE__*/React.createElement("line", { x1: 0, y1: 90, x2: 330, y2: 90, stroke: "var(--line)", strokeWidth: 1 }),
+              /*#__PURE__*/React.createElement("polygon", { points: dashChart.area, fill: "var(--accent)", opacity: 0.13 }),
+              /*#__PURE__*/React.createElement("polyline", { points: dashChart.inc, fill: "none", stroke: "var(--accent)", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" }),
+              /*#__PURE__*/React.createElement("polyline", { points: dashChart.shp, fill: "none", stroke: "var(--positive)", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" }))),
+      /*#__PURE__*/React.createElement("div", { className: "skl-card" },
+        /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600, marginBottom: 8 } }, "Структура"),
+        /*#__PURE__*/React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+          /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 100 100", width: 92, height: 92 },
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--card-2)", strokeWidth: 14 }),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--accent)", strokeWidth: 14, strokeDasharray: `${dashDonut.segB} 251.3`, transform: "rotate(-90 50 50)" }),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--positive)", strokeWidth: 14, strokeDasharray: `${dashDonut.segS} 251.3`, strokeDashoffset: -dashDonut.segB, transform: "rotate(-90 50 50)" }),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--negative)", strokeWidth: 14, strokeDasharray: `${dashDonut.segD} 251.3`, strokeDashoffset: -(dashDonut.segB + dashDonut.segS), transform: "rotate(-90 50 50)" })),
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, lineHeight: 1.9, color: 'var(--ink)' } },
+            /*#__PURE__*/React.createElement("div", null, dot('var(--accent)'), "Остаток ", dashDonut.pctB, "%"),
+            /*#__PURE__*/React.createElement("div", null, dot('var(--positive)'), "Отгружено ", dashDonut.pctS, "%"),
+            /*#__PURE__*/React.createElement("div", null, dot('var(--negative)'), "Брак ", dashDonut.pctD, "%"))))),
+    /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 13, marginBottom: 20 } },
+      /*#__PURE__*/React.createElement("div", { className: "skl-card" },
+        /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600, marginBottom: 11 } }, "Топ артикулов по остатку"),
+        dashTop.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Пока пусто")
+          : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+              dashTop.map((a, i) => /*#__PURE__*/React.createElement("div", { key: i, style: { display: 'flex', alignItems: 'center', gap: 9 } },
+                /*#__PURE__*/React.createElement("span", { className: "skl-mono", style: { fontSize: 11.5, color: 'var(--accent)', width: 74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, a.article),
+                /*#__PURE__*/React.createElement("div", { style: { flex: 1, height: 6, background: 'var(--card-2)', borderRadius: 3, overflow: 'hidden' } },
+                  /*#__PURE__*/React.createElement("div", { style: { width: `${Math.max(4, Math.round(a.balance / maxBalance * 100))}%`, height: '100%', background: 'var(--accent)' } })),
+                /*#__PURE__*/React.createElement("span", { style: { fontSize: 11.5, color: 'var(--ink-soft)', width: 46, textAlign: 'right' } }, a.balance))))),
+      /*#__PURE__*/React.createElement("div", { className: "skl-card" },
+        /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600, marginBottom: 11 } }, "Последние операции"),
+        dashRecent.length === 0
+          ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Действий пока нет")
+          : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 9, fontSize: 12 } },
+              dashRecent.map((a, i) => /*#__PURE__*/React.createElement("div", { key: i, style: { display: 'flex', alignItems: 'center', gap: 9 } },
+                /*#__PURE__*/React.createElement("span", { style: { width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', flex: 'none' } }),
+                /*#__PURE__*/React.createElement("div", { style: { flex: 1, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, a.label),
+                /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)', flex: 'none' } }, fmtDate(a.date))))))));
   return /*#__PURE__*/React.createElement("div", {
+    className: "skl-root",
     style: _objectSpread(_objectSpread({}, darkMode ? {
       // «Полночь» — тёмный фон, фиолетовый акцент
       '--paper': '#14131C',
@@ -2124,7 +2229,6 @@ function SkladLedger() {
       background: 'var(--paper)',
       color: 'var(--ink)',
       minHeight: '100%',
-      padding: '24px',
       boxSizing: 'border-box'
     })
   }, /*#__PURE__*/React.createElement("style", null, `
@@ -2175,6 +2279,67 @@ function SkladLedger() {
         }
         .skl-divider { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes skl-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+        .skl-sidebar {
+          position: fixed; left: 0; top: 0; bottom: 0; width: 210px; z-index: 50;
+          background: var(--card); border-right: 1px solid var(--line);
+          padding: 18px 14px; display: flex; flex-direction: column; box-sizing: border-box;
+        }
+        .skl-side-logo { display: flex; align-items: center; gap: 10px; padding: 4px 6px 16px; }
+        .skl-nav {
+          display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+          padding: 9px 11px; border-radius: 10px; border: none; background: transparent;
+          color: var(--ink-soft); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+          cursor: pointer; transition: background .15s, color .15s;
+        }
+        .skl-nav:hover { background: var(--row-hover); color: var(--ink); }
+        .skl-nav.on { background: var(--accent-soft); color: var(--ink); }
+        .skl-nav.on svg { color: var(--accent); }
+        .skl-side-user {
+          display: flex; align-items: center; gap: 9px; padding: 9px; border-radius: 11px;
+          background: var(--card-2); border: 1px solid var(--line);
+        }
+        .skl-side-ava {
+          width: 28px; height: 28px; border-radius: 8px; flex: none; background: var(--accent-soft);
+          color: var(--accent); display: flex; align-items: center; justify-content: center;
+          font-weight: 700; font-size: 12px; font-family: 'Space Grotesk', sans-serif;
+        }
+        .skl-side-logout {
+          margin-left: auto; background: transparent; border: none; color: var(--ink-soft);
+          cursor: pointer; padding: 5px; display: flex; border-radius: 7px; transition: .15s;
+        }
+        .skl-side-logout:hover { color: var(--negative); background: var(--negative-soft); }
+        .skl-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+        .skl-iconbtn {
+          width: 36px; height: 36px; border-radius: 10px; display: inline-flex; align-items: center;
+          justify-content: center; background: var(--card); border: 1px solid var(--line);
+          color: var(--ink-soft); cursor: pointer; transition: .15s;
+        }
+        .skl-iconbtn:hover { color: var(--ink); border-color: var(--accent); }
+        .skl-menu {
+          position: absolute; right: 0; top: 42px; z-index: 60; min-width: 214px;
+          background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px;
+          box-shadow: 0 18px 44px -12px rgba(0,0,0,.5); animation: skl-fade .14s ease;
+        }
+        .skl-menu-item {
+          display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+          padding: 9px 10px; border-radius: 8px; border: none; background: transparent;
+          color: var(--ink); font-family: 'Inter', sans-serif; font-size: 13px; cursor: pointer;
+        }
+        .skl-menu-item:hover { background: var(--row-hover); }
+        .skl-menu-item.danger { color: var(--negative); }
+        .skl-menu-sep { height: 1px; background: var(--line); margin: 5px 4px; }
+        .skl-metric { transition: transform .15s, border-color .15s; }
+        .skl-metric:hover { transform: translateY(-2px); border-color: var(--accent); }
+        .skl-root { padding: 24px 28px 28px 238px; min-height: 100vh; box-sizing: border-box; }
+        @media (max-width: 760px) {
+          .skl-root { padding: 14px; }
+          .skl-sidebar { position: static; width: auto; flex-direction: row; flex-wrap: wrap; z-index: auto;
+            border-right: none; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+          .skl-side-logo { width: 100%; padding-bottom: 10px; }
+          .skl-nav { width: auto; }
+          .skl-side-user { display: none; }
+        }
 
         .skl-label-sheet { display: none; }
         @media print {
@@ -2300,119 +2465,111 @@ function SkladLedger() {
       fontSize: 12,
       color: 'var(--ink-soft)'
     }
-  }, "Вести учёт, загружать акты, обрабатывать ТЗ"))))) : /*#__PURE__*/React.createElement(React.Fragment, null, printMode && /*#__PURE__*/React.createElement(LabelPrintView, {
+  }, "Вести учёт, загружать акты, обрабатывать ТЗ"))))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("aside", {
+    className: "skl-sidebar"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "skl-side-logo"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "skl-logo",
+    style: { width: 34, height: 34, borderRadius: 10 }
+  }, /*#__PURE__*/React.createElement(Box, { size: 18 })), /*#__PURE__*/React.createElement("div", {
+    className: "skl-display",
+    style: { fontWeight: 700, fontSize: 15 }
+  }, "Склад")), /*#__PURE__*/React.createElement("nav", {
+    style: { display: 'flex', flexDirection: 'column', gap: 4 }
+  }, navItems.map(n => /*#__PURE__*/React.createElement("button", {
+    key: n.key,
+    onClick: () => { setActiveTab(n.key); setMenuOpen(false); },
+    className: "skl-nav" + (activeTab === n.key ? " on" : "")
+  }, n.icon, /*#__PURE__*/React.createElement("span", null, n.label)))), /*#__PURE__*/React.createElement("div", {
+    style: { flex: 1 }
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "skl-side-user"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "skl-side-ava"
+  }, role === 'client' ? 'К' : 'Ф'), /*#__PURE__*/React.createElement("div", {
+    style: { lineHeight: 1.25, minWidth: 0, flex: 1 }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, fontWeight: 600 }
+  }, role === 'client' ? 'Клиент' : 'Фулфилмент'), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 10.5, color: 'var(--ink-soft)' }
+  }, "вход выполнен")), /*#__PURE__*/React.createElement("button", {
+    className: "skl-side-logout",
+    title: "Выйти",
+    onClick: () => window.supabase.auth.signOut()
+  }, svgIcon([
+    /*#__PURE__*/React.createElement("path", { key: 1, d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" }),
+    /*#__PURE__*/React.createElement("polyline", { key: 2, points: "16 17 21 12 16 7" }),
+    /*#__PURE__*/React.createElement("line", { key: 3, x1: 21, y1: 12, x2: 9, y2: 12 })
+  ])))), printMode && /*#__PURE__*/React.createElement(LabelPrintView, {
     items: labelItems()
   }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'flex-end',
-      flexWrap: 'wrap',
-      gap: 12,
-      marginBottom: 6
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: { display: 'flex', alignItems: 'center', gap: 13 }
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "skl-logo"
-  }, /*#__PURE__*/React.createElement(Box, { size: 24 })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "skl-topbar"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: 'var(--ink-soft)',
       letterSpacing: '0.12em',
       textTransform: 'uppercase',
-      marginBottom: 4
+      marginBottom: 3
     }
   }, "Учёт остатков · Wildberries"), /*#__PURE__*/React.createElement("h1", {
     className: "skl-display",
-    style: {
-      fontSize: 28,
-      margin: 0
-    }
-  }, "Склад клиента"), /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 13,
-      color: 'var(--ink-soft)',
-      marginTop: 2
-    }
-  }, "ИП Мукозобов Д.В."))), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 10,
-      alignItems: 'center'
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "skl-stamp",
-    style: {
-      color: 'var(--accent)'
-    }
-  }, role === 'client' ? 'Клиент' : 'Фулфилмент'), saving && /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontSize: 12,
-      color: 'var(--ink-soft)',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6
-    }
+    style: { fontSize: 24, margin: 0 }
+  }, pageTitle)), /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', gap: 8, alignItems: 'center' }
+  }, saving && /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 12, color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: 6 }
   }, /*#__PURE__*/React.createElement(Loader2, {
     size: 14,
-    style: {
-      animation: 'spin 1s linear infinite'
-    }
-  }), " сохранение…"), /*#__PURE__*/React.createElement("button", {
-    className: "skl-btn skl-btn-ghost",
+    style: { animation: 'spin 1s linear infinite' }
+  }), " сохранение…"), /*#__PURE__*/React.createElement("span", {
+    className: "skl-stamp"
+  }, role === 'client' ? 'Клиент' : 'Фулфилмент'), /*#__PURE__*/React.createElement("button", {
+    className: "skl-iconbtn",
     onClick: () => setDarkMode(d => !d),
     title: darkMode ? 'Светлая тема' : 'Тёмная тема'
-  }, darkMode ? /*#__PURE__*/React.createElement(Sun, {
-    size: 14
-  }) : /*#__PURE__*/React.createElement(Moon, {
-    size: 14
-  })), /*#__PURE__*/React.createElement("button", {
-    className: "skl-btn skl-btn-ghost",
-    onClick: loadAll
-  }, /*#__PURE__*/React.createElement(RefreshCcw, {
-    size: 14
-  }), " Обновить"), /*#__PURE__*/React.createElement("label", {
-    className: "skl-btn skl-btn-ghost",
-    style: {
-      cursor: 'pointer'
-    }
-  }, /*#__PURE__*/React.createElement(FolderOpen, {
-    size: 14
-  }), " Загрузить копию данных", /*#__PURE__*/React.createElement("input", {
+  }, darkMode ? /*#__PURE__*/React.createElement(Sun, { size: 15 }) : /*#__PURE__*/React.createElement(Moon, { size: 15 })), /*#__PURE__*/React.createElement("button", {
+    className: "skl-iconbtn",
+    onClick: loadAll,
+    title: "Обновить"
+  }, /*#__PURE__*/React.createElement(RefreshCcw, { size: 15 })), /*#__PURE__*/React.createElement("div", {
+    style: { position: 'relative' }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "skl-iconbtn",
+    onClick: () => setMenuOpen(o => !o),
+    title: "Ещё"
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: 17, height: 17, viewBox: "0 0 24 24", fill: "currentColor"
+  }, /*#__PURE__*/React.createElement("circle", { cx: 12, cy: 5, r: 1.6 }),
+    /*#__PURE__*/React.createElement("circle", { cx: 12, cy: 12, r: 1.6 }),
+    /*#__PURE__*/React.createElement("circle", { cx: 12, cy: 19, r: 1.6 }))), menuOpen && /*#__PURE__*/React.createElement("div", {
+    className: "skl-menu"
+  }, /*#__PURE__*/React.createElement("label", {
+    className: "skl-menu-item",
+    style: { cursor: 'pointer' }
+  }, /*#__PURE__*/React.createElement(FolderOpen, { size: 15 }), " Загрузить копию данных", /*#__PURE__*/React.createElement("input", {
     type: "file",
     accept: ".json",
-    onChange: importBackup,
-    style: {
-      display: 'none'
-    }
+    onChange: e => { importBackup(e); setMenuOpen(false); },
+    style: { display: 'none' }
   })), /*#__PURE__*/React.createElement("button", {
-    className: "skl-btn skl-btn-ghost",
-    onClick: exportBackup
-  }, /*#__PURE__*/React.createElement(Save, {
-    size: 14
-  }), " Скачать копию данных"), /*#__PURE__*/React.createElement("button", {
+    className: "skl-menu-item",
+    onClick: () => { exportBackup(); setMenuOpen(false); }
+  }, /*#__PURE__*/React.createElement(Save, { size: 15 }), " Скачать копию данных"), /*#__PURE__*/React.createElement("div", {
+    className: "skl-menu-sep"
+  }), /*#__PURE__*/React.createElement("button", {
+    className: "skl-menu-item danger",
+    onClick: () => { resetAllData(); setMenuOpen(false); }
+  }, /*#__PURE__*/React.createElement(Trash2, { size: 15 }), " Сбросить всё (тест)"))), /*#__PURE__*/React.createElement("button", {
     className: "skl-btn skl-btn-primary",
     onClick: exportExcel
-  }, /*#__PURE__*/React.createElement(Download, {
-    size: 14
-  }), " Экспорт в Excel"), /*#__PURE__*/React.createElement("button", {
-    className: "skl-btn skl-btn-ghost",
-    style: {
-      color: 'var(--negative)',
-      borderColor: 'var(--negative)'
-    },
-    onClick: resetAllData
-  }, /*#__PURE__*/React.createElement(Trash2, {
-    size: 14
-  }), " Сбросить всё (тест)"))), /*#__PURE__*/React.createElement("hr", {
-    className: "skl-divider"
-  }), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement(Download, { size: 14 }), " Экспорт"))), activeTab === 'dashboard' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
       gap: 11,
-      marginBottom: 20
+      marginBottom: 13
     }
   }, [{
     label: 'Артикулов',
@@ -2466,7 +2623,7 @@ function SkladLedger() {
     })
   }].map((s, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
-    className: "skl-card",
+    className: "skl-card skl-metric",
     style: {
       padding: '15px 16px',
       borderColor: s.highlight ? 'var(--accent)' : 'var(--line)'
@@ -2491,7 +2648,7 @@ function SkladLedger() {
       color: 'var(--ink-soft)',
       marginTop: 3
     }
-  }, s.label)))), /*#__PURE__*/React.createElement("div", {
+  }, s.label)))), dashboardCharts), false && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,
