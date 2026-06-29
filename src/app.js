@@ -2111,6 +2111,7 @@ function SkladLedger() {
       pctB: Math.round(b / sum * 100), pctS: Math.round(s / sum * 100), pctD: Math.round(d / sum * 100) };
   }, [totals]);
   const maxBalance = Math.max(1, ...dashTop.map(a => a.balance));
+  const dashRecent = actions.slice(0, 6);
   const svgIcon = children => /*#__PURE__*/React.createElement("svg", {
     width: 17, height: 17, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
     strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round"
