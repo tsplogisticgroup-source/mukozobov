@@ -279,6 +279,7 @@ const KEY_ACTIONS = 'sklad:actions';
 const KEY_TZ_REQUESTS = 'sklad:tz_requests';
 const KEY_TZ_WAREHOUSES = 'sklad:tz_warehouses';
 const KEY_BARCODES = 'sklad:wb_barcodes';
+const KEY_CATALOG = 'sklad:catalog';
 const ACTIONS_KEEP = 50;
 const KEY_LAST_BACKUP = 'sklad:meta:lastBackup';
 const BACKUP_PREFIX = 'sklad:backup:';
@@ -716,6 +717,7 @@ function SkladLedger() {
   // Новая логика этикеток — загрузка Excel и генерация PDF
   const [labelFile, setLabelFile] = useState(null);
   const [labelArticles, setLabelArticles] = useState({});
+  const [catalog, setCatalog] = useState({});
   const [labelBoxes, setLabelBoxes] = useState({});
   const [labelError, setLabelError] = useState('');
   const [generatingLabels, setGeneratingLabels] = useState(false);
@@ -928,6 +930,11 @@ function SkladLedger() {
       const val = r ? JSON.parse(r.value) : {};
       setNames(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
     } catch (_unused13) {/* keep current data on error */}
+    try {
+      const r = await window.storage.get(KEY_CATALOG, true);
+      const val = r ? JSON.parse(r.value) : {};
+      setCatalog(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
+    } catch (_unusedCat) {/* keep current data on error */}
     setLoading(false);
   }
   async function persist(key, value, setter) {
@@ -1211,162 +1218,59 @@ function SkladLedger() {
     if ((_r$tzRequests = r.tzRequests) !== null && _r$tzRequests !== void 0 && _r$tzRequests.length) persist(KEY_TZ_REQUESTS, tzRequests.filter(t => !r.tzRequests.includes(t.id)), setTzRequests);
     persist(KEY_ACTIONS, actions.filter(a => a.id !== actionId), setActions);
   }
+  // Загрузка каталога товаров (плоский файл: Название, Баркод, Артикул, Цвет, Размер, ...).
+  // Сохраняем в Supabase (KEY_CATALOG) — загрузил один раз, работает везде и после перезагрузки.
   function handleLabelFile(file) {
     if (!file) return;
     setLabelFile(file);
     setLabelError('');
-    setLabelArticles({});
-    setLabelBoxes({});
     const reader = new FileReader();
     reader.onload = e => {
       try {
         const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, {
-          type: 'array'
-        });
-        const parsed = {};
-
-        // Шаг 1: Собираем названия и цвета из первого листа (Товары поставки)
-        const nameMap = {}; // code -> {name, color}
-        try {
-          const ws0 = wb.Sheets[wb.SheetNames[0]];
-          const rows0 = XLSX.utils.sheet_to_json(ws0, {
-            header: 1,
-            defval: null
-          });
-          for (let i = 1; i < rows0.length; i++) {
-            const row = rows0[i];
-            if (!row) continue;
-            const artFull = row[1];
-            const color = row[9];
-            if (!artFull) continue;
-            const artStr = String(artFull).trim();
-            const parts = artStr.split(/\s+/);
-            const code = parts[0].trim();
-            const name = parts.slice(1).join(' ');
-            if (code && name && !nameMap[code]) {
-              nameMap[code] = {
-                name: name.charAt(0).toUpperCase() + name.slice(1),
-                color: color ? String(color).charAt(0).toUpperCase() + String(color).slice(1) : ''
-              };
-            }
-          }
-        } catch (e) {
-          console.warn('nameMap error:', e.message);
-        }
-
-        // Шаг 2: Парсим УЧЕТ листы для получения размерных сеток и баркодов
-        for (const sheetName of wb.SheetNames) {
-          try {
-            const ws = wb.Sheets[sheetName];
-            const rows = XLSX.utils.sheet_to_json(ws, {
-              header: 1,
-              defval: null
-            });
-            if (!rows || rows.length < 3) continue;
-            let headerIdx = -1;
-            let headers = [];
-            for (let hi = 0; hi < Math.min(5, rows.length); hi++) {
-              const r = rows[hi];
-              if (!r || !Array.isArray(r)) continue;
-              const candidate = r.map(h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim());
-              if (candidate.some(h => h.includes('артикул поставщика'))) {
-                headerIdx = hi;
-                headers = candidate;
-                break;
-              }
-            }
-            if (headerIdx === -1) continue;
-            const artCol = headers.findIndex(h => h.includes('артикул поставщика'));
-            const sizeCol = headers.findIndex(h => h === 'размер');
-            const barcodeCol = headers.findIndex(h => h.includes('баркод'));
-            const colorCol = headers.findIndex(h => h === 'цвет');
-            let qtyCol = headers.findIndex(h => h.includes('получено') && h.includes('итого') && !h.includes('поставщика') && !h.includes('других') && !h.includes('отгруж') && !h.includes('брак') && !h.includes('чз'));
-            if (qtyCol === -1) qtyCol = headers.findIndex(h => h.includes('получено') && h.includes('итого') && !h.includes('отгруж') && !h.includes('брак'));
-            if (artCol === -1 || sizeCol === -1 || barcodeCol === -1 || qtyCol === -1) continue;
-            // Запасное название = категория из имени листа («УЧЕТ - Лоферы» -> «Лоферы»).
-            // Нужно для артикулов, которых нет в листе «Товары поставки» (у них нет описания).
-            const sheetCategory = sheetName.replace(/^\s*уч[её]т\s*[-–—:]*\s*/i, '').trim();
-            const catName = sheetCategory
-              ? sheetCategory.charAt(0).toUpperCase() + sheetCategory.slice(1).toLowerCase()
-              : '';
-            let lastArt = null;
-            for (let i = headerIdx + 1; i < rows.length; i++) {
-              const row = rows[i];
-              if (!row || !Array.isArray(row)) continue;
-              const artRaw = row[artCol];
-              const size = row[sizeCol];
-              const barcode = row[barcodeCol];
-              const qty = row[qtyCol];
-              if (size == null || barcode == null) continue;
-              const sizeInt = parseInt(String(size));
-              const bcInt = parseInt(String(barcode));
-              if (isNaN(sizeInt) || isNaN(bcInt)) continue;
-              if (artRaw != null) lastArt = String(artRaw).trim();
-              if (!lastArt) continue;
-              // Берём только первый код (до пробела или =)
-              const code = lastArt.split(/[\s=]+/)[0].trim();
-              if (!code) continue;
-              const color = colorCol !== -1 && row[colorCol] != null ? String(row[colorCol]).trim() : '';
-              // Название берём из nameMap (из первого листа)
-              const meta = nameMap[code] || {};
-              if (!parsed[code]) {
-                parsed[code] = {
-                  code,
-                  name: meta.name || catName,
-                  color: meta.color || color.charAt(0).toUpperCase() + color.slice(1),
-                  sizes: []
-                };
-              }
-              if (!parsed[code].sizes.find(s => s.size === sizeInt)) {
-                parsed[code].sizes.push({
-                  size: sizeInt,
-                  barcode: String(bcInt),
-                  qty: parseFloat(qty || 0)
-                });
-              }
-            }
-          } catch (sheetErr) {
-            console.warn('Лист', sheetName, ':', sheetErr.message);
+        const wb = XLSX.read(data, { type: 'array' });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
+        // Ищем строку заголовка с колонками Название / Баркод / Артикул / Размер
+        let hdr = -1, col = {};
+        for (let i = 0; i < Math.min(5, rows.length); i++) {
+          const r = (rows[i] || []).map(c => String(c == null ? '' : c).toLowerCase().trim());
+          const find = sub => r.findIndex(c => c.includes(sub));
+          const cName = find('назван'), cBar = find('баркод'), cArt = find('артикул'), cSize = find('размер');
+          if (cName !== -1 && cBar !== -1 && cArt !== -1 && cSize !== -1) {
+            hdr = i;
+            col = { name: cName, bar: cBar, art: cArt, size: cSize, color: find('цвет'), brand: find('бренд') };
+            break;
           }
         }
-
-        // Fallback: если листы с нужной структурой не найдены — читаем первый лист
-        if (Object.keys(parsed).length === 0) {
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, {
-            header: 1
-          });
-          for (let i = 1; i < rows.length; i++) {
-            const row = rows[i];
-            const artFull = row[1],
-              size = row[2],
-              barcode = row[3],
-              qty = row[6],
-              color = row[9];
-            if (!artFull || !size || !barcode) continue;
-            const artStr = String(artFull).trim();
-            const parts = artStr.split(/\s+/);
-            const code = parts[0];
-            const name = parts.slice(1).join(' ');
-            if (!parsed[artStr]) parsed[artStr] = {
-              code,
-              name: name.charAt(0).toUpperCase() + name.slice(1),
-              color: String(color || '').charAt(0).toUpperCase() + String(color || '').slice(1),
-              sizes: []
-            };
-            parsed[artStr].sizes.push({
-              size: parseInt(size),
-              barcode: String(parseInt(barcode)),
-              qty: parseFloat(qty || 0)
-            });
-          }
-        }
-        if (Object.keys(parsed).length === 0) {
-          setLabelError('Артикулы не найдены — проверь формат файла');
+        if (hdr === -1) {
+          setLabelError('Не найдены колонки «Название, Баркод, Артикул, Размер» — проверь файл.');
           return;
         }
-        setLabelArticles(parsed);
+        const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+        const cat = {}; // code -> { name, color, brand, sizes: { размер: баркод } }
+        for (let i = hdr + 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row) continue;
+          const artFull = row[col.art], bar = row[col.bar], size = row[col.size];
+          if (artFull == null || bar == null || size == null) continue;
+          const code = String(artFull).trim().split(/\s+/)[0];
+          if (!code) continue;
+          if (!cat[code]) cat[code] = {
+            name: cap(String(row[col.name] || '').trim()),
+            color: col.color !== -1 ? cap(String(row[col.color] || '').trim()) : '',
+            brand: col.brand !== -1 ? String(row[col.brand] || '').trim() : '',
+            sizes: {}
+          };
+          const sz = String(size).trim();
+          const bc = String(bar).trim();
+          if (sz && bc && !cat[code].sizes[sz]) cat[code].sizes[sz] = bc;
+        }
+        if (Object.keys(cat).length === 0) {
+          setLabelError('Артикулы не найдены в файле.');
+          return;
+        }
+        setLabelError('');
+        persist(KEY_CATALOG, cat, setCatalog);
       } catch (err) {
         setLabelError('Не удалось прочитать файл: ' + err.message);
       }
@@ -1973,6 +1877,31 @@ function SkladLedger() {
       numeric: true
     }));
   }, [incomes, shipments, defects, photo]);
+  // Данные для этикеток: содержимое (имя, штрихкод, цвет, размеры) — из каталога,
+  // количество по размерам — из остатка склада. Так раздел «Этикетки» и кнопка
+  // «Скачать для работы» берут всё из одного сохранённого каталога.
+  useEffect(() => {
+    const out = {};
+    for (const code of Object.keys(catalog)) {
+      const c = catalog[code];
+      const stock = summary.find(s => s.article === code);
+      out[code] = {
+        code,
+        name: c.name || '',
+        color: c.color || '',
+        sizes: Object.keys(c.sizes || {}).map(size => {
+          const sz = stock && stock.sizes.find(x => String(x.size) === String(size));
+          const num = parseInt(size);
+          return {
+            size: isNaN(num) ? size : num,
+            barcode: String(c.sizes[size]),
+            qty: sz ? sz.income : 0
+          };
+        })
+      };
+    }
+    setLabelArticles(out);
+  }, [catalog, summary]);
   const photoArticleOptions = useMemo(() => summary.map(s => s.article), [summary]);
   useEffect(() => {
     if (!photoArticleOptions.length) return;
@@ -3672,7 +3601,7 @@ function SkladLedger() {
       marginTop: 0,
       marginBottom: 16
     }
-  }, "Загрузи файл учёта товаров, выбери нужные артикулы и укажи количество коробов."), /*#__PURE__*/React.createElement("div", {
+  }, "Загрузи каталог товаров (Название, Баркод, Артикул, Размер). Он сохраняется в базе — достаточно загрузить один раз. Дальше выбирай артикулы и указывай количество коробов."), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 16
     }
@@ -3683,7 +3612,7 @@ function SkladLedger() {
     }
   }, /*#__PURE__*/React.createElement(FileSpreadsheet, {
     size: 14
-  }), labelFile ? `✓ ${labelFile.name}` : 'Загрузить Excel с баркодами', /*#__PURE__*/React.createElement("input", {
+  }), labelFile ? `✓ ${labelFile.name}` : Object.keys(catalog).length ? `✓ Каталог загружен (${Object.keys(catalog).length} арт.) — обновить` : 'Загрузить каталог товаров', /*#__PURE__*/React.createElement("input", {
     type: "file",
     accept: ".xlsx,.xls",
     style: {
