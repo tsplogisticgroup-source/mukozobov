@@ -2288,11 +2288,12 @@ function SkladLedger() {
         }
         .skl-side-logo { display: flex; align-items: center; gap: 10px; padding: 4px 6px 16px; }
         .skl-nav {
-          display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
-          padding: 9px 11px; border-radius: 10px; border: none; background: transparent;
-          color: var(--ink-soft); font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500;
+          display: flex; align-items: center; gap: 13px; width: 100%; text-align: left;
+          padding: 13px 14px; border-radius: 12px; border: none; background: transparent;
+          color: var(--ink-soft); font-family: 'Inter', sans-serif; font-size: 14.5px; font-weight: 500;
           cursor: pointer; transition: background .15s, color .15s;
         }
+        .skl-nav svg { width: 20px; height: 20px; }
         .skl-nav:hover { background: var(--row-hover); color: var(--ink); }
         .skl-nav.on { background: var(--accent-soft); color: var(--ink); }
         .skl-nav.on svg { color: var(--accent); }
@@ -2477,7 +2478,7 @@ function SkladLedger() {
     className: "skl-display",
     style: { fontWeight: 700, fontSize: 15 }
   }, "Склад")), /*#__PURE__*/React.createElement("nav", {
-    style: { display: 'flex', flexDirection: 'column', gap: 4 }
+    style: { display: 'flex', flexDirection: 'column', gap: 7 }
   }, navItems.map(n => /*#__PURE__*/React.createElement("button", {
     key: n.key,
     onClick: () => { setActiveTab(n.key); setMenuOpen(false); },
