@@ -719,6 +719,7 @@ function SkladLedger() {
   const [labelBoxes, setLabelBoxes] = useState({});
   const [labelError, setLabelError] = useState('');
   const [generatingLabels, setGeneratingLabels] = useState(false);
+  const [bundlingTz, setBundlingTz] = useState(null);
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
@@ -1059,7 +1060,15 @@ function SkladLedger() {
     const total = rowsData.reduce((s, r) => s + r.boxesNumeric, 0);
     return formatBoxes(total);
   }
-  function downloadTzExcel(rowsData, date) {
+  function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  function buildTzExcelBlob(rowsData) {
     const data = rowsData.map(r => ({
       'Артикул': r.article,
       'Название': r.name,
@@ -1070,9 +1079,13 @@ function SkladLedger() {
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'ТЗ отгрузка');
-    XLSX.writeFile(wb, `tz_otgruzka_${date}.xlsx`);
+    const arr = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   }
-  function downloadTzWord(rowsData, date, note, warehouse) {
+  function downloadTzExcel(rowsData, date) {
+    triggerDownload(buildTzExcelBlob(rowsData), `tz_otgruzka_${date}.xlsx`);
+  }
+  function buildTzWordBlob(rowsData, date, note, warehouse) {
     const rows = rowsData.map(r => `
       <tr>
         <td style="padding:8px;border:1px solid #999;">${r.article}${r.name ? ' — ' + r.name : ''}</td>
@@ -1100,15 +1113,37 @@ function SkladLedger() {
           </tr>
         </table>
       </body></html>`;
-    const blob = new Blob(['\ufeff', html], {
-      type: 'application/msword'
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tz_otgruzka_${date}.doc`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return new Blob(['\ufeff', html], { type: 'application/msword' });
+  }
+  function downloadTzWord(rowsData, date, note, warehouse) {
+    triggerDownload(buildTzWordBlob(rowsData, date, note, warehouse), `tz_otgruzka_${date}.doc`);
+  }
+  async function downloadTzBundle(r) {
+    if (bundlingTz) return;
+    setBundlingTz(r.id);
+    try {
+      const zip = new window.JSZip();
+      zip.file(`\u0422\u0417_${r.date}.doc`, buildTzWordBlob(r.rows, r.date, r.note, r.warehouse));
+      zip.file(`\u0422\u0417_${r.date}.xlsx`, buildTzExcelBlob(r.rows));
+      const labelInput = r.rows.filter(row => row.boxesNumeric > 0).map(row => ({ artStr: row.article, boxes: row.boxesNumeric }));
+      let labelsBlob = null;
+      try {
+        labelsBlob = await generateLabelPDFs(labelInput, { combine: true, returnBlob: true });
+      } catch (e) {
+        console.error('labels for bundle failed:', e);
+      }
+      if (labelsBlob) zip.file(`\u042d\u0442\u0438\u043a\u0435\u0442\u043a\u0438_${r.date}.pdf`, labelsBlob);
+      const blob = await zip.generateAsync({ type: 'blob' });
+      triggerDownload(blob, `\u041e\u0442\u0433\u0440\u0443\u0437\u043a\u0430_${fmtDate(r.date)}.zip`);
+      if (!labelsBlob) {
+        alert('\u0410\u0440\u0445\u0438\u0432 \u0441\u043a\u0430\u0447\u0430\u043d, \u043d\u043e \u0411\u0415\u0417 \u044d\u0442\u0438\u043a\u0435\u0442\u043e\u043a: \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b \u0448\u0442\u0440\u0438\u0445\u043a\u043e\u0434\u044b \u0434\u043b\u044f \u0430\u0440\u0442\u0438\u043a\u0443\u043b\u043e\u0432 \u0437\u0430\u044f\u0432\u043a\u0438.\n\n\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0444\u0430\u0439\u043b \u0441 \u0431\u0430\u0440\u043a\u043e\u0434\u0430\u043c\u0438 \u0432 \u0440\u0430\u0437\u0434\u0435\u043b\u0435 \u00ab\u042d\u0442\u0438\u043a\u0435\u0442\u043a\u0438\u00bb (\u0442\u043e\u0442 \u0436\u0435, \u0447\u0442\u043e \u0434\u043b\u044f \u043f\u0435\u0447\u0430\u0442\u0438), \u0437\u0430\u0442\u0435\u043c \u0441\u043a\u0430\u0447\u0430\u0439\u0442\u0435 \u043f\u0430\u043a\u0435\u0442 \u0441\u043d\u043e\u0432\u0430.');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u043e\u0431\u0440\u0430\u0442\u044c \u0430\u0440\u0445\u0438\u0432: ' + (e.message || e));
+    } finally {
+      setBundlingTz(null);
+    }
   }
   function submitTzRequest() {
     const rowsData = tzRows();
@@ -1338,7 +1373,7 @@ function SkladLedger() {
     };
     reader.readAsArrayBuffer(file);
   }
-  async function generateLabelPDFs(selectedItems) {
+  async function generateLabelPDFs(selectedItems, opts = {}) {
     const items = selectedItems || labelSelected;
     const selected = items.map(({
       artStr,
@@ -1462,20 +1497,24 @@ function SkladLedger() {
 
         return cvs.toDataURL('image/png');
       }
+      const combine = opts.combine; // объединить все артикулы в один PDF (для пакета ТЗ)
+      const combinedDoc = combine ? new jsPDF({ unit: 'mm', format: [LW_mm, LH_mm], orientation: 'landscape' }) : null;
+      let combinedFirst = true;
       for (let idx = 0; idx < selected.length; idx++) {
         const [artStr, numBoxes] = selected[idx];
         const data = labelArticles[artStr];
+        if (!data) continue; // артикула нет в загруженном файле баркодов — пропускаем
         setLabelProgress(`Генерирую ${idx + 1} из ${selected.length}: ${data.code}…`);
         await new Promise(r => setTimeout(r, 10));
         const totalQty = data.sizes.reduce((s, x) => s + x.qty, 0);
         if (!totalQty) continue;
         const refBoxes = totalQty / BOX;
-        const doc = new jsPDF({
+        const doc = combine ? combinedDoc : new jsPDF({
           unit: 'mm',
           format: [LW_mm, LH_mm],
           orientation: 'landscape'
         });
-        let first = true;
+        let first = combine ? combinedFirst : true;
         for (const s of [...data.sizes].sort((a, b) => a.size - b.size)) {
           const count = Math.round(s.qty / refBoxes * numBoxes);
           for (let n = 0; n < count; n++) {
@@ -1485,8 +1524,17 @@ function SkladLedger() {
             doc.addImage(imgData, 'PNG', 0, 0, LW_mm, LH_mm);
           }
         }
-        doc.save(`этикетки_${data.code}.pdf`);
-        await new Promise(r => setTimeout(r, 300));
+        if (combine) {
+          combinedFirst = first;
+        } else {
+          doc.save(`этикетки_${data.code}.pdf`);
+          await new Promise(r => setTimeout(r, 300));
+        }
+      }
+      if (combine) {
+        setLabelProgress('');
+        if (combinedFirst) return null; // ни одной этикетки не получилось
+        return opts.returnBlob ? combinedDoc.output('blob') : combinedDoc.save('этикетки.pdf');
       }
       setLabelProgress(`Готово! Скачано ${selected.length} PDF файл(ов).`);
     } catch (e) {
@@ -3569,6 +3617,12 @@ function SkladLedger() {
         flexWrap: 'wrap'
       }
     }, /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-primary",
+      disabled: bundlingTz === r.id,
+      onClick: () => downloadTzBundle(r)
+    }, /*#__PURE__*/React.createElement(Download, {
+      size: 12
+    }), bundlingTz === r.id ? " Собираю архив…" : " Скачать для работы"), /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
       onClick: () => downloadTzWord(r.rows, r.date, r.note, r.warehouse)
     }, /*#__PURE__*/React.createElement(Download, {
