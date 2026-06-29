@@ -2369,9 +2369,9 @@ function SkladLedger() {
     size: 14
   })), /*#__PURE__*/React.createElement("button", {
     className: "skl-btn skl-btn-ghost",
-    onClick: switchRole,
-    title: "Сменить роль"
-  }, "Сменить роль"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => window.supabase.auth.signOut(),
+    title: "Войти под другим аккаунтом"
+  }, "Сменить аккаунт"), /*#__PURE__*/React.createElement("button", {
     className: "skl-btn skl-btn-ghost",
     onClick: loadAll
   }, /*#__PURE__*/React.createElement(RefreshCcw, {

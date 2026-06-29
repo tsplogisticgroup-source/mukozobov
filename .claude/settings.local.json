@@ -42,7 +42,8 @@
       "Bash(rm -f _inspect.cjs vite.out.log vite.err.log)",
       "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Этикетки: чинить слетающее наименование товара' -m 'Причина: у 143 из 168 артикулов нет описания в листе «Товары поставки»,' -m 'поэтому на этикетку падал голый артикул.' -m '- Запасное название = категория из имени листа УЧЕТ \\(Кеды/Лоферы/...\\)' -m '- Длинные названия ужимаются по шрифту, а не обрезаются на полуслове' -m '- Пустая строка «Цвет:» не печатается, если цвета нет' -m 'Проверено на реальном файле: наименование теперь есть у всех артикулов.' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
       "mcp__visualize__read_me",
-      "mcp__visualize__show_widget"
+      "mcp__visualize__show_widget",
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Роли: привязка к аккаунту вместо ручного выбора' -m '- AuthGate берёт роль из метаданных пользователя Supabase и проставляет sklad_role' -m '- Экран ручного выбора роли больше не нужен \\(роль = аккаунт\\)' -m '- Кнопка «Сменить роль» -> «Сменить аккаунт» \\(выход и вход под другим логином\\)' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

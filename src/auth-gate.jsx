@@ -39,6 +39,15 @@ export default function AuthGate({ children }) {
   }
 
   if (session) {
+    // Роль определяется аккаунтом (метаданные пользователя в Supabase),
+    // а не выбирается вручную. Прокидываем её в localStorage до монтирования
+    // приложения — оно читает 'sklad_role' оттуда и пропускает экран выбора.
+    const accRole = session.user?.app_metadata?.role || session.user?.user_metadata?.role;
+    if (accRole) {
+      try {
+        if (localStorage.getItem('sklad_role') !== accRole) localStorage.setItem('sklad_role', accRole);
+      } catch (_) {}
+    }
     return (
       <>
         {children}
