@@ -1,0 +1,5 @@
+# Настройки сборки для Netlify.
+# Netlify сам выполнит сборку при каждом коммите и опубликует папку dist.
+[build]
+  command = "npm run build"
+  publish = "dist"

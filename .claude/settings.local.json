@@ -54,7 +54,15 @@
       "Bash(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5173/src/app.js)",
       "Bash(echo \"app.js: $\\(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5173/src/app.js\\)\")",
       "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Этикетки: каталог товаров из отдельного файла + хранение в Supabase' -m '- Новый парсер плоского каталога \\(Название/Баркод/Артикул/Цвет/Размер/Бренд\\)' -m '- Каталог сохраняется в KEY_CATALOG и грузится при старте \\(один раз — работает везде\\)' -m '- labelArticles derived из каталога + остатка: содержимое из каталога, кол-во по остатку' -m '- Раздел «Этикетки» и пакет ТЗ берут данные из этого каталога' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
-      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Этикетки в пакете ТЗ: отдельный PDF на каждый артикул \\(папка Этикетки/\\)' -m '- generateLabelPDFs: режим returnBlobs -> [{code, blob}] по PDF на артикул' -m '- downloadTzBundle кладёт их в ZIP как Этикетки/<артикул>.pdf' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+      "Bash(git -c user.name=MUKAZ -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Этикетки в пакете ТЗ: отдельный PDF на каждый артикул \\(папка Этикетки/\\)' -m '- generateLabelPDFs: режим returnBlobs -> [{code, blob}] по PDF на артикул' -m '- downloadTzBundle кладёт их в ZIP как Этикетки/<артикул>.pdf' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; npm run build 2>&1 | Select-Object -Last 20)",
+      "Bash(gh --version)",
+      "Bash(gh auth *)",
+      "Bash(git config *)",
+      "Bash(ls \"/c/Users/imya/AppData/Local/GitHubDesktop\")",
+      "Bash(winget --version)",
+      "Bash(git commit *)",
+      "Bash(git branch *)"
     ]
   }
 }
