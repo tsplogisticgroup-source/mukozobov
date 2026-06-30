@@ -1133,16 +1133,16 @@ function SkladLedger() {
       zip.file(`\u0422\u0417_${r.date}.doc`, buildTzWordBlob(r.rows, r.date, r.note, r.warehouse));
       zip.file(`\u0422\u0417_${r.date}.xlsx`, buildTzExcelBlob(r.rows));
       const labelInput = r.rows.filter(row => row.boxesNumeric > 0).map(row => ({ artStr: row.article, boxes: row.boxesNumeric }));
-      let labelsBlob = null;
+      let labelBlobs = [];
       try {
-        labelsBlob = await generateLabelPDFs(labelInput, { combine: true, returnBlob: true });
+        labelBlobs = (await generateLabelPDFs(labelInput, { returnBlobs: true })) || [];
       } catch (e) {
         console.error('labels for bundle failed:', e);
       }
-      if (labelsBlob) zip.file(`\u042d\u0442\u0438\u043a\u0435\u0442\u043a\u0438_${r.date}.pdf`, labelsBlob);
+      labelBlobs.forEach(({ code, blob }) => zip.file(`\u042d\u0442\u0438\u043a\u0435\u0442\u043a\u0438/${code}.pdf`, blob));
       const blob = await zip.generateAsync({ type: 'blob' });
       triggerDownload(blob, `\u041e\u0442\u0433\u0440\u0443\u0437\u043a\u0430_${fmtDate(r.date)}.zip`);
-      if (!labelsBlob) {
+      if (!labelBlobs.length) {
         alert('\u0410\u0440\u0445\u0438\u0432 \u0441\u043a\u0430\u0447\u0430\u043d, \u043d\u043e \u0411\u0415\u0417 \u044d\u0442\u0438\u043a\u0435\u0442\u043e\u043a: \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b \u0448\u0442\u0440\u0438\u0445\u043a\u043e\u0434\u044b \u0434\u043b\u044f \u0430\u0440\u0442\u0438\u043a\u0443\u043b\u043e\u0432 \u0437\u0430\u044f\u0432\u043a\u0438.\n\n\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 \u0444\u0430\u0439\u043b \u0441 \u0431\u0430\u0440\u043a\u043e\u0434\u0430\u043c\u0438 \u0432 \u0440\u0430\u0437\u0434\u0435\u043b\u0435 \u00ab\u042d\u0442\u0438\u043a\u0435\u0442\u043a\u0438\u00bb (\u0442\u043e\u0442 \u0436\u0435, \u0447\u0442\u043e \u0434\u043b\u044f \u043f\u0435\u0447\u0430\u0442\u0438), \u0437\u0430\u0442\u0435\u043c \u0441\u043a\u0430\u0447\u0430\u0439\u0442\u0435 \u043f\u0430\u043a\u0435\u0442 \u0441\u043d\u043e\u0432\u0430.');
       }
     } catch (e) {
@@ -1401,13 +1401,15 @@ function SkladLedger() {
 
         return cvs.toDataURL('image/png');
       }
-      const combine = opts.combine; // объединить все артикулы в один PDF (для пакета ТЗ)
+      const combine = opts.combine; // объединить все артикулы в один PDF
+      const returnBlobs = opts.returnBlobs; // вернуть массив [{code, blob}] — по PDF на артикул (для пакета ТЗ)
       const combinedDoc = combine ? new jsPDF({ unit: 'mm', format: [LW_mm, LH_mm], orientation: 'landscape' }) : null;
       let combinedFirst = true;
+      const blobs = [];
       for (let idx = 0; idx < selected.length; idx++) {
         const [artStr, numBoxes] = selected[idx];
         const data = labelArticles[artStr];
-        if (!data) continue; // артикула нет в загруженном файле баркодов — пропускаем
+        if (!data) continue; // артикула нет в каталоге — пропускаем
         setLabelProgress(`Генерирую ${idx + 1} из ${selected.length}: ${data.code}…`);
         await new Promise(r => setTimeout(r, 10));
         const totalQty = data.sizes.reduce((s, x) => s + x.qty, 0);
@@ -1430,6 +1432,8 @@ function SkladLedger() {
         }
         if (combine) {
           combinedFirst = first;
+        } else if (returnBlobs) {
+          if (!first) blobs.push({ code: data.code, blob: doc.output('blob') });
         } else {
           doc.save(`этикетки_${data.code}.pdf`);
           await new Promise(r => setTimeout(r, 300));
@@ -1439,6 +1443,10 @@ function SkladLedger() {
         setLabelProgress('');
         if (combinedFirst) return null; // ни одной этикетки не получилось
         return opts.returnBlob ? combinedDoc.output('blob') : combinedDoc.save('этикетки.pdf');
+      }
+      if (returnBlobs) {
+        setLabelProgress('');
+        return blobs;
       }
       setLabelProgress(`Готово! Скачано ${selected.length} PDF файл(ов).`);
     } catch (e) {
