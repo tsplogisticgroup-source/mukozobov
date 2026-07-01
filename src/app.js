@@ -722,6 +722,7 @@ function SkladLedger() {
   const [labelError, setLabelError] = useState('');
   const [generatingLabels, setGeneratingLabels] = useState(false);
   const [bundlingTz, setBundlingTz] = useState(null);
+  const [wbBusy, setWbBusy] = useState(null);
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
@@ -1091,6 +1092,81 @@ function SkladLedger() {
   }
   function downloadTzExcel(rowsData, date) {
     triggerDownload(buildTzExcelBlob(rowsData), `tz_otgruzka_${date}.xlsx`);
+  }
+  function aoaXlsxBlob(rows) {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sheet1');
+    const arr = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    return new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  // Генерация файлов поставки WB (Boxes + Summary) из заявки ТЗ.
+  // Размерный ряд (8 пар в коробе) — из остатка склада. Первый ШК короба вводится вручную.
+  async function downloadWbSupply(r) {
+    const input = window.prompt('Первый ШК короба WB для этой поставки\n(например: WB_1611640048):', 'WB_');
+    if (!input) return;
+    const m = String(input).match(/(\d{3,})/);
+    if (!m) { alert('Не распознал номер короба. Введите в формате WB_1611640048'); return; }
+    setWbBusy(r.id);
+    try {
+      let boxNum = parseInt(m[1], 10);
+      // Разложить 8 пар по размерам пропорционально остатку (целые, сумма ровно 8).
+      const distribute8 = weights => {
+        const total = weights.reduce((a, b) => a + b, 0);
+        if (total <= 0) return null;
+        const raw = weights.map(w => w / total * 8);
+        const res = raw.map(x => Math.floor(x));
+        const order = raw.map((x, i) => ({ i, f: x - Math.floor(x) })).sort((a, b) => b.f - a.f);
+        let guard = 0;
+        while (res.reduce((a, b) => a + b, 0) < 8 && guard < 100) {
+          res[order[guard % order.length].i]++;
+          guard++;
+        }
+        return res;
+      };
+      const boxesRows = [['Баркод товара', 'Кол-во товаров', 'ШК короба', 'Срок годности']];
+      const summaryMap = new Map();
+      const missing = [];
+      for (const row of r.rows) {
+        const code = row.article;
+        const boxes = Math.round(row.boxesNumeric || 0);
+        if (boxes <= 0) continue;
+        const data = labelArticles[code];
+        if (!data || !data.sizes.length) { missing.push(code); continue; }
+        const sizes = [...data.sizes].sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
+        const vec = distribute8(sizes.map(s => s.qty));
+        if (!vec) { missing.push(code); continue; }
+        for (let b = 0; b < boxes; b++) {
+          const wb = 'WB_' + boxNum++;
+          sizes.forEach((s, i) => {
+            if (vec[i] > 0) {
+              const bc = Number(s.barcode) || s.barcode;
+              boxesRows.push([bc, vec[i], wb, null]);
+              summaryMap.set(bc, (summaryMap.get(bc) || 0) + vec[i]);
+            }
+          });
+        }
+      }
+      if (boxesRows.length === 1) {
+        alert('Нет данных для генерации: у артикулов заявки нет остатка (размерный ряд берётся из остатка склада).');
+        return;
+      }
+      const summaryRows = [['Баркод', 'Количество'], ...[...summaryMap.entries()].map(([bc, q]) => [bc, q])];
+      const zip = new window.JSZip();
+      zip.file(`boxes_${r.date}.xlsx`, aoaXlsxBlob(boxesRows));
+      zip.file(`summary_${r.date}.xlsx`, aoaXlsxBlob(summaryRows));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const lastBox = boxNum - 1;
+      triggerDownload(blob, `Поставка_WB_${fmtDate(r.date)}.zip`);
+      const totalBoxes = boxesRows.slice(1).map(x => x[2]).filter((v, i, a) => a.indexOf(v) === i).length;
+      let msg = `Готово! ${totalBoxes} коробов (до WB_${lastBox}).`;
+      if (missing.length) msg += `\nПропущены (нет остатка/каталога): ${missing.join(', ')}`;
+      alert(msg);
+    } catch (e) {
+      console.error(e);
+      alert('Ошибка генерации: ' + (e.message || e));
+    } finally {
+      setWbBusy(null);
+    }
   }
   function buildTzWordBlob(rowsData, date, note, warehouse) {
     const rows = rowsData.map(r => `
@@ -3560,6 +3636,12 @@ function SkladLedger() {
     }, /*#__PURE__*/React.createElement(Download, {
       size: 12
     }), bundlingTz === r.id ? " Собираю архив…" : " Скачать для работы"), /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-ghost",
+      disabled: wbBusy === r.id,
+      onClick: () => downloadWbSupply(r)
+    }, /*#__PURE__*/React.createElement(Box, {
+      size: 12
+    }), wbBusy === r.id ? " Генерирую…" : " Поставка WB"), /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
       onClick: () => downloadTzWord(r.rows, r.date, r.note, r.warehouse)
     }, /*#__PURE__*/React.createElement(Download, {

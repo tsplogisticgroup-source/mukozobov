@@ -62,7 +62,12 @@
       "Bash(ls \"/c/Users/imya/AppData/Local/GitHubDesktop\")",
       "Bash(winget --version)",
       "Bash(git commit *)",
-      "Bash(git branch *)"
+      "Bash(git branch *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(rm -rf _samples)",
+      "Bash(mkdir -p _samples)",
+      "Bash(unzip -o \"C:/Users/imya/Downloads/муказззз.zip\" -d _samples)"
     ]
   }
 }
