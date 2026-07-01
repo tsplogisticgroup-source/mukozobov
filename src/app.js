@@ -1109,6 +1109,36 @@ function SkladLedger() {
     setWbBusy(r.id);
     try {
       let boxNum = parseInt(m[1], 10);
+      // Этикетки на короба: PDF, по одной этикетке на короб (артикул + ШК короба + номер).
+      const { jsPDF } = window.jspdf;
+      const LWmm = 58, LHmm = 40, MM = 300 / 25.4, PT = 300 / 72;
+      const labelDoc = new jsPDF({ unit: 'mm', format: [LWmm, LHmm], orientation: 'landscape' });
+      let firstLabel = true;
+      const renderBoxLabel = async (article, wbCode) => {
+        const W = Math.round(LWmm * MM), H = Math.round(LHmm * MM);
+        const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
+        const ctx = cvs.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#000'; ctx.textAlign = 'center';
+        const maxW = W - Math.round(6 * MM);
+        let artPt = 22; ctx.font = `bold ${Math.round(artPt * PT)}px Arial`;
+        while (ctx.measureText(article).width > maxW && artPt > 8) { artPt -= 0.5; ctx.font = `bold ${Math.round(artPt * PT)}px Arial`; }
+        ctx.fillText(article, W / 2, Math.round(12 * MM));
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        document.body.appendChild(svg);
+        window.JsBarcode(svg, wbCode, { format: 'CODE128', displayValue: false, width: 2, height: 80, margin: 0, background: '#ffffff', lineColor: '#000000' });
+        const svgStr = new XMLSerializer().serializeToString(svg);
+        document.body.removeChild(svg);
+        const img = new Image();
+        const url = URL.createObjectURL(new Blob([svgStr], { type: 'image/svg+xml' }));
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+        URL.revokeObjectURL(url);
+        const bcW = W - Math.round(10 * MM), bcH = Math.round(13 * MM);
+        ctx.drawImage(img, (W - bcW) / 2, Math.round(16 * MM), bcW, bcH);
+        ctx.font = `${Math.round(6 * PT)}px Arial`;
+        ctx.fillText(wbCode, W / 2, Math.round(35 * MM));
+        return cvs.toDataURL('image/png');
+      };
       // Разложить 8 пар по размерам пропорционально остатку (целые, сумма ровно 8).
       const distribute8 = weights => {
         const total = weights.reduce((a, b) => a + b, 0);
@@ -1137,6 +1167,9 @@ function SkladLedger() {
         if (!vec) { missing.push(code); continue; }
         for (let b = 0; b < boxes; b++) {
           const wb = 'WB_' + boxNum++;
+          if (!firstLabel) labelDoc.addPage([LWmm, LHmm], 'landscape');
+          firstLabel = false;
+          labelDoc.addImage(await renderBoxLabel(code, wb), 'PNG', 0, 0, LWmm, LHmm);
           sizes.forEach((s, i) => {
             if (vec[i] > 0) {
               const bc = Number(s.barcode) || s.barcode;
@@ -1154,6 +1187,7 @@ function SkladLedger() {
       const zip = new window.JSZip();
       zip.file(`boxes_${r.date}.xlsx`, aoaXlsxBlob(boxesRows));
       zip.file(`summary_${r.date}.xlsx`, aoaXlsxBlob(summaryRows));
+      if (!firstLabel) zip.file(`labels_${r.date}.pdf`, labelDoc.output('blob'));
       const blob = await zip.generateAsync({ type: 'blob' });
       const lastBox = boxNum - 1;
       triggerDownload(blob, `Поставка_WB_${fmtDate(r.date)}.zip`);
