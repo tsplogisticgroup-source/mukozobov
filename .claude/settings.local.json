@@ -68,7 +68,8 @@
       "Bash(rm -rf _samples)",
       "Bash(mkdir -p _samples)",
       "Bash(unzip -o \"C:/Users/imya/Downloads/муказззз.zip\" -d _samples)",
-      "Bash(awk '{print $5}')"
+      "Bash(awk '{print $5}')",
+      "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Поставка WB: ввод номера короба прямо на карточке ТЗ \\(вместо prompt\\)' -m '- Кнопка «Поставка WB» раскрывает поле ввода + «Сгенерировать»/«Отмена»' -m '- Убрано браузерное окно window.prompt' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

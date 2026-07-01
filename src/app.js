@@ -723,6 +723,8 @@ function SkladLedger() {
   const [generatingLabels, setGeneratingLabels] = useState(false);
   const [bundlingTz, setBundlingTz] = useState(null);
   const [wbBusy, setWbBusy] = useState(null);
+  const [wbPromptFor, setWbPromptFor] = useState(null);
+  const [wbNumber, setWbNumber] = useState('WB_');
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
@@ -1101,11 +1103,10 @@ function SkladLedger() {
   }
   // Генерация файлов поставки WB (Boxes + Summary) из заявки ТЗ.
   // Размерный ряд (8 пар в коробе) — из остатка склада. Первый ШК короба вводится вручную.
-  async function downloadWbSupply(r) {
-    const input = window.prompt('Первый ШК короба WB для этой поставки\n(например: WB_1611640048):', 'WB_');
-    if (!input) return;
-    const m = String(input).match(/(\d{3,})/);
-    if (!m) { alert('Не распознал номер короба. Введите в формате WB_1611640048'); return; }
+  async function downloadWbSupply(r, input) {
+    const m = String(input || '').match(/(\d{3,})/);
+    if (!m) { alert('Введите номер короба в формате WB_1611640048'); return; }
+    setWbPromptFor(null);
     setWbBusy(r.id);
     try {
       let boxNum = parseInt(m[1], 10);
@@ -3672,10 +3673,29 @@ function SkladLedger() {
     }), bundlingTz === r.id ? " Собираю архив…" : " Скачать для работы"), /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
       disabled: wbBusy === r.id,
-      onClick: () => downloadWbSupply(r)
+      onClick: () => { setWbNumber('WB_'); setWbPromptFor(f => f === r.id ? null : r.id); }
     }, /*#__PURE__*/React.createElement(Box, {
       size: 12
-    }), wbBusy === r.id ? " Генерирую…" : " Поставка WB"), /*#__PURE__*/React.createElement("button", {
+    }), wbBusy === r.id ? " Генерирую…" : " Поставка WB"), wbPromptFor === r.id && /*#__PURE__*/React.createElement("div", {
+      style: { flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 13, color: 'var(--ink-soft)' }
+    }, "Первый ШК короба WB:"), /*#__PURE__*/React.createElement("input", {
+      className: "skl-input",
+      autoFocus: true,
+      value: wbNumber,
+      onChange: e => setWbNumber(e.target.value),
+      onKeyDown: e => { if (e.key === 'Enter') downloadWbSupply(r, wbNumber); },
+      placeholder: "WB_1611640048",
+      style: { maxWidth: 220 }
+    }), /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-primary",
+      disabled: wbBusy === r.id,
+      onClick: () => downloadWbSupply(r, wbNumber)
+    }, wbBusy === r.id ? "Генерирую…" : "Сгенерировать"), /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-ghost",
+      onClick: () => setWbPromptFor(null)
+    }, "Отмена")), /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
       onClick: () => downloadTzWord(r.rows, r.date, r.note, r.warehouse)
     }, /*#__PURE__*/React.createElement(Download, {
