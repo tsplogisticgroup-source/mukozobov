@@ -280,6 +280,8 @@ const KEY_TZ_REQUESTS = 'sklad:tz_requests';
 const KEY_TZ_WAREHOUSES = 'sklad:tz_warehouses';
 const KEY_BARCODES = 'sklad:wb_barcodes';
 const KEY_CATALOG = 'sklad:catalog';
+const KEY_RECEIVING = 'sklad:receiving';
+const RECEIVING_BUCKET = 'receiving';
 const ACTIONS_KEEP = 50;
 const KEY_LAST_BACKUP = 'sklad:meta:lastBackup';
 const BACKUP_PREFIX = 'sklad:backup:';
@@ -718,6 +720,16 @@ function SkladLedger() {
   const [labelFile, setLabelFile] = useState(null);
   const [labelArticles, setLabelArticles] = useState({});
   const [catalog, setCatalog] = useState({});
+  const [receiving, setReceiving] = useState([]);
+  const [recvDate, setRecvDate] = useState(() => todayISO());
+  const [recvTruck, setRecvTruck] = useState('');
+  const [recvCarrier, setRecvCarrier] = useState('');
+  const [recvBoxes, setRecvBoxes] = useState('');
+  const [recvNote, setRecvNote] = useState('');
+  const [recvTruckPhotos, setRecvTruckPhotos] = useState([]);
+  const [recvCargoPhotos, setRecvCargoPhotos] = useState([]);
+  const [recvSaving, setRecvSaving] = useState(false);
+  const [recvProgress, setRecvProgress] = useState('');
   const [labelBoxes, setLabelBoxes] = useState({});
   const [labelError, setLabelError] = useState('');
   const [generatingLabels, setGeneratingLabels] = useState(false);
@@ -938,6 +950,10 @@ function SkladLedger() {
       const val = r ? JSON.parse(r.value) : {};
       setCatalog(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
     } catch (_unusedCat) {/* keep current data on error */}
+    try {
+      const r = await window.storage.get(KEY_RECEIVING, true);
+      if (r) setReceiving(JSON.parse(r.value));
+    } catch (_unusedRecv) {/* keep current data on error */}
     setLoading(false);
   }
   async function persist(key, value, setter) {
@@ -1202,6 +1218,77 @@ function SkladLedger() {
     } finally {
       setWbBusy(null);
     }
+  }
+  // Сжимаем фото перед загрузкой (телефонные фото по 3-5 МБ -> ~200-400 КБ).
+  function compressImage(file) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(img.src);
+        c.toBlob(b => resolve(b || file), 'image/jpeg', 0.8);
+      };
+      img.onerror = () => resolve(file);
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  async function submitReceiving() {
+    if (!recvTruck.trim()) { alert('Укажите номер машины.'); return; }
+    setRecvSaving(true);
+    setRecvProgress('');
+    try {
+      const id = uid();
+      const all = [
+        ...recvTruckPhotos.map(f => ({ f, kind: 'truck' })),
+        ...recvCargoPhotos.map(f => ({ f, kind: 'cargo' }))
+      ];
+      const photos = [];
+      for (let i = 0; i < all.length; i++) {
+        setRecvProgress(`Загружаю фото ${i + 1} из ${all.length}…`);
+        const blob = await compressImage(all[i].f);
+        const path = `${id}/${all[i].kind}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`;
+        const { error } = await window.supabase.storage.from(RECEIVING_BUCKET).upload(path, blob, {
+          contentType: 'image/jpeg', upsert: false
+        });
+        if (error) throw error;
+        const { data } = window.supabase.storage.from(RECEIVING_BUCKET).getPublicUrl(path);
+        photos.push({ url: data.publicUrl, path, kind: all[i].kind });
+      }
+      const record = {
+        id, date: recvDate, truck: recvTruck.trim(), carrier: recvCarrier.trim(),
+        boxes: recvBoxes, note: recvNote.trim(), photos,
+        addedAt: new Date().toISOString(), createdBy: role
+      };
+      await persist(KEY_RECEIVING, [record, ...receiving], setReceiving);
+      logAction(`Приёмка машины ${record.truck}${record.boxes ? ` · ${record.boxes}` : ''}${photos.length ? ` · фото: ${photos.length}` : ''}`, {});
+      setRecvTruck(''); setRecvCarrier(''); setRecvBoxes(''); setRecvNote('');
+      setRecvTruckPhotos([]); setRecvCargoPhotos([]); setRecvProgress('');
+      alert('Приёмка сохранена.');
+    } catch (e) {
+      console.error(e);
+      const msg = (e && e.message) || String(e);
+      if (/bucket|not found|does not exist/i.test(msg)) {
+        alert('Хранилище фото не настроено (бакет «receiving»). Создайте его в Supabase по инструкции и повторите.');
+      } else {
+        alert('Ошибка сохранения: ' + msg);
+      }
+    } finally {
+      setRecvSaving(false);
+      setRecvProgress('');
+    }
+  }
+  async function deleteReceiving(rec) {
+    if (!window.confirm(`Удалить запись приёмки машины ${rec.truck} от ${fmtDate(rec.date)}? Фото тоже удалятся.`)) return;
+    try {
+      if (rec.photos && rec.photos.length) {
+        await window.supabase.storage.from(RECEIVING_BUCKET).remove(rec.photos.map(p => p.path));
+      }
+    } catch (e) { console.error('remove photos failed', e); }
+    persist(KEY_RECEIVING, receiving.filter(x => x.id !== rec.id), setReceiving);
   }
   function buildTzWordBlob(rowsData, date, note, warehouse) {
     const rows = rowsData.map(r => `
@@ -2220,6 +2307,11 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("rect", { key: 4, x: 3, y: 16, width: 7, height: 5, rx: 1 }) ]) },
     { key: 'main', label: 'Остатки', icon: /*#__PURE__*/React.createElement(Box, { size: 17 }) },
     { key: 'ops', label: 'Операции', icon: /*#__PURE__*/React.createElement(Upload, { size: 17 }) },
+    ...(role === 'fulfillment' ? [{ key: 'receiving', label: 'Приёмка машин', icon: svgIcon([
+      /*#__PURE__*/React.createElement("path", { key: 1, d: "M14 18V6a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1" }),
+      /*#__PURE__*/React.createElement("path", { key: 2, d: "M14 9h4l3 3v5a1 1 0 0 1-1 1h-1" }),
+      /*#__PURE__*/React.createElement("circle", { key: 3, cx: 7, cy: 18, r: 2 }),
+      /*#__PURE__*/React.createElement("circle", { key: 4, cx: 17, cy: 18, r: 2 }) ]) }] : []),
     { key: 'tz', label: 'ТЗ на отгрузку', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 17 }) },
     ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }] : []),
     { key: 'reports', label: 'Отчёты', icon: svgIcon([
@@ -2279,6 +2371,51 @@ function SkladLedger() {
                 /*#__PURE__*/React.createElement("span", { style: { width: 6, height: 6, borderRadius: 3, background: 'var(--accent)', flex: 'none' } }),
                 /*#__PURE__*/React.createElement("div", { style: { flex: 1, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, a.label),
                 /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)', flex: 'none' } }, fmtDate(a.date))))))));
+  const recvField = (label, input, extra) => /*#__PURE__*/React.createElement("label", {
+    style: Object.assign({ display: 'block' }, extra || {})
+  }, /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)', marginBottom: 5 } }, label), input);
+  const recvPhotoField = (label, files, setFiles) => /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)', marginBottom: 5 } }, label),
+    /*#__PURE__*/React.createElement("label", { className: "skl-btn skl-btn-ghost", style: { cursor: 'pointer' } },
+      /*#__PURE__*/React.createElement(Camera, { size: 14 }),
+      files.length ? ` ✓ выбрано: ${files.length}` : ' Выбрать / снять фото',
+      /*#__PURE__*/React.createElement("input", {
+        type: "file", accept: "image/*", capture: "environment", multiple: true, style: { display: 'none' },
+        onChange: e => setFiles(Array.from(e.target.files || []))
+      })));
+  const receivingContent = /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement(Section, { title: "Новая приёмка машины", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 } },
+        recvField('Дата', /*#__PURE__*/React.createElement("input", { type: "date", className: "skl-input", value: recvDate, onChange: e => setRecvDate(e.target.value) })),
+        recvField('Номер машины *', /*#__PURE__*/React.createElement("input", { className: "skl-input", value: recvTruck, onChange: e => setRecvTruck(e.target.value), placeholder: "А123ВС 77" })),
+        recvField('Перевозчик', /*#__PURE__*/React.createElement("input", { className: "skl-input", value: recvCarrier, onChange: e => setRecvCarrier(e.target.value), placeholder: "необязательно" })),
+        recvField('Коробов / паллет', /*#__PURE__*/React.createElement("input", { className: "skl-input", value: recvBoxes, onChange: e => setRecvBoxes(e.target.value), placeholder: "напр. 20 паллет" }))),
+      recvField('Комментарий', /*#__PURE__*/React.createElement("input", { className: "skl-input", value: recvNote, onChange: e => setRecvNote(e.target.value), placeholder: "состояние груза, замечания…" }), { marginBottom: 14 }),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 } },
+        recvPhotoField('Фото машины', recvTruckPhotos, setRecvTruckPhotos),
+        recvPhotoField('Фото загрузки в фуре', recvCargoPhotos, setRecvCargoPhotos)),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: recvSaving, onClick: submitReceiving }, recvSaving ? "Сохраняю…" : "Сохранить приёмку"),
+        recvProgress && /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } }, recvProgress))),
+    /*#__PURE__*/React.createElement(Section, { title: `Журнал приёмок (${receiving.length})`, icon: /*#__PURE__*/React.createElement(Clock, { size: 18 }), open: true, collapsible: false },
+      receiving.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Пока нет записей. Добавь первую приёмку выше.")
+        : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+            receiving.map(rec => /*#__PURE__*/React.createElement("div", { key: rec.id, className: "skl-card" },
+              /*#__PURE__*/React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' } },
+                /*#__PURE__*/React.createElement("div", null,
+                  /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 16, fontWeight: 700 } }, "🚚 ", rec.truck),
+                  /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } },
+                    fmtDate(rec.date), rec.carrier ? ` · ${rec.carrier}` : '', rec.boxes ? ` · ${rec.boxes}` : '')),
+                /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteReceiving(rec) },
+                  /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить")),
+              rec.note && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, marginTop: 8, color: 'var(--ink)' } }, rec.note),
+              rec.photos && rec.photos.length > 0 && /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
+                rec.photos.map((p, i) => /*#__PURE__*/React.createElement("img", {
+                  key: i, src: p.url, alt: p.kind, title: p.kind === 'truck' ? 'Фото машины' : 'Фото загрузки',
+                  onClick: () => window.open(p.url, '_blank'),
+                  style: { width: 76, height: 76, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--line)', cursor: 'pointer' }
+                }))))))));
   return /*#__PURE__*/React.createElement("div", {
     className: "skl-root",
     style: _objectSpread(_objectSpread({}, darkMode ? {
@@ -4483,7 +4620,7 @@ function SkladLedger() {
     className: "skl-btn skl-btn-ghost",
     disabled: restoring,
     onClick: () => restoreBackup(b.key)
-  }, "Восстановить")))))))), activeTab === 'main' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
+  }, "Восстановить")))))))), activeTab === 'receiving' && receivingContent, activeTab === 'main' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
     title: "Остатки по артикулам",
     icon: /*#__PURE__*/React.createElement(Box, {
       size: 18
