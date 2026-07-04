@@ -428,33 +428,20 @@ function analyzeAkt(items) {
     };
     boxes[it.box].sizes[it.size] = (boxes[it.box].sizes[it.size] || 0) + it.qty;
   });
-  const patternVotes = {};
+  // Брак определяем по ИТОГУ артикула: (кол-во коробов × 8) − (отгружено пар).
+  // 1 короб = 1 ШК короба = 8 пар. Если суммарно пар столько, сколько коробов×8 —
+  // брака НЕТ, даже при пересорте (нестандартная раскладка размеров, в т.ч. когда
+  // в одном коробе больше, в другом меньше — они компенсируют друг друга).
+  // Размер недобора не определяем (при пересорте он неизвестен) — пишем на артикул.
+  const boxCountByArticle = {}, shippedByArticle = {};
   Object.values(boxes).forEach(b => {
-    const total = Object.values(b.sizes).reduce((a, c) => a + c, 0);
-    if (total === BOX_SIZE) {
-      const sig = JSON.stringify(Object.entries(b.sizes).sort());
-      patternVotes[b.article] = patternVotes[b.article] || {};
-      patternVotes[b.article][sig] = (patternVotes[b.article][sig] || 0) + 1;
-    }
+    boxCountByArticle[b.article] = (boxCountByArticle[b.article] || 0) + 1;
+    shippedByArticle[b.article] = (shippedByArticle[b.article] || 0) + Object.values(b.sizes).reduce((a, c) => a + c, 0);
   });
-  const patterns = {};
-  Object.entries(patternVotes).forEach(([article, votes]) => {
-    const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0][0];
-    patterns[article] = Object.fromEntries(JSON.parse(best));
-  });
-  const defectMap = {};
-  Object.values(boxes).forEach(b => {
-    const total = Object.values(b.sizes).reduce((a, c) => a + c, 0);
-    if (total >= BOX_SIZE) return;
-    const pattern = patterns[b.article];
-    if (!pattern) return;
-    Object.entries(pattern).forEach(([size, expected]) => {
-      const actual = b.sizes[size] || 0;
-      if (actual < expected) {
-        const key = `${b.article}|||${size}`;
-        defectMap[key] = (defectMap[key] || 0) + (expected - actual);
-      }
-    });
+  const defectMap = {}; // article -> qty недобора
+  Object.keys(boxCountByArticle).forEach(article => {
+    const short = boxCountByArticle[article] * BOX_SIZE - shippedByArticle[article];
+    if (short > 0) defectMap[article] = short;
   });
   const totalsMap = {};
   items.forEach(it => {
@@ -472,7 +459,9 @@ function analyzeAkt(items) {
     totals: Object.entries(totalsMap).map(([k, qty]) => _objectSpread(_objectSpread({}, splitKey(k)), {}, {
       qty
     })),
-    defects: Object.entries(defectMap).map(([k, qty]) => _objectSpread(_objectSpread({}, splitKey(k)), {}, {
+    defects: Object.entries(defectMap).map(([article, qty]) => ({
+      article,
+      size: NO_SIZE,
       qty
     })),
     boxCount: Object.keys(boxes).length
