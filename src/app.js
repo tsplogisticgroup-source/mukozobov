@@ -719,6 +719,8 @@ function SkladLedger() {
   const [recvCargoPhotos, setRecvCargoPhotos] = useState([]);
   const [recvSaving, setRecvSaving] = useState(false);
   const [recvProgress, setRecvProgress] = useState('');
+  const [recvIncome, setRecvIncome] = useState(null); // { fileName, entries:[{article,size,qty}] }
+  const [recvIncomeErr, setRecvIncomeErr] = useState('');
   const [labelBoxes, setLabelBoxes] = useState({});
   const [labelError, setLabelError] = useState('');
   const [generatingLabels, setGeneratingLabels] = useState(false);
@@ -1225,6 +1227,46 @@ function SkladLedger() {
       img.src = URL.createObjectURL(file);
     });
   }
+  // Разбор файла прихода (те же колонки, что в «Операции»: артикул/размер/количество).
+  function parseIncomeRows(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = evt => {
+        try {
+          const wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array', cellDates: true });
+          const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+          const headers = (json[0] || []).map(h => String(h));
+          const rows = json.slice(1).filter(r => r.some(c => c !== ''));
+          const map = {};
+          FIELD_DEFS['income'].forEach(f => { map[f.key] = guessHeader(headers, f.candidates); });
+          const iArt = map.article ? headers.indexOf(map.article) : -1;
+          const iSize = map.size ? headers.indexOf(map.size) : -1;
+          const iQty = map.qty ? headers.indexOf(map.qty) : -1;
+          if (iArt < 0 || iQty < 0) { reject(new Error('Не найдены колонки «Артикул» и «Количество».')); return; }
+          const entries = rows.map(r => ({
+            article: String(r[iArt]).trim(),
+            size: iSize >= 0 && r[iSize] !== '' ? String(r[iSize]).trim() : NO_SIZE,
+            qty: Number(r[iQty]) || 0
+          })).filter(e => e.article && e.qty);
+          resolve(entries);
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+  async function handleRecvIncomeFile(file) {
+    if (!file) return;
+    setRecvIncomeErr('');
+    try {
+      const entries = await parseIncomeRows(file);
+      if (!entries.length) { setRecvIncomeErr('В файле не найдено позиций прихода.'); setRecvIncome(null); return; }
+      setRecvIncome({ fileName: file.name, entries });
+    } catch (e) {
+      setRecvIncomeErr(e.message || 'Не удалось прочитать файл прихода.');
+      setRecvIncome(null);
+    }
+  }
   async function submitReceiving() {
     if (!recvTruck.trim()) { alert('Укажите номер машины.'); return; }
     setRecvSaving(true);
@@ -1247,16 +1289,30 @@ function SkladLedger() {
         const { data } = window.supabase.storage.from(RECEIVING_BUCKET).getPublicUrl(path);
         photos.push({ url: data.publicUrl, path, kind: all[i].kind });
       }
+      // Приход товара, пришедшего этой машиной (создаёт остаток на складе).
+      let incomeIds = [], incomeQty = 0;
+      if (recvIncome && recvIncome.entries.length) {
+        const newIncomes = recvIncome.entries.map(e => ({
+          id: uid(), article: e.article, size: e.size, qty: e.qty,
+          date: recvDate, addedAt: new Date().toISOString(),
+          note: `Приёмка машины ${recvTruck.trim()}`, recvId: id, fileName: recvIncome.fileName
+        }));
+        incomeIds = newIncomes.map(x => x.id);
+        incomeQty = newIncomes.reduce((s, x) => s + x.qty, 0);
+        await persist(KEY_INCOMES, [...incomes, ...newIncomes], setIncomes);
+      }
       const record = {
         id, date: recvDate, truck: recvTruck.trim(), carrier: recvCarrier.trim(),
         boxes: recvBoxes, note: recvNote.trim(), photos,
+        incomeIds, incomeCount: incomeIds.length, incomeQty,
         addedAt: new Date().toISOString(), createdBy: role
       };
       await persist(KEY_RECEIVING, [record, ...receiving], setReceiving);
-      logAction(`Приёмка машины ${record.truck}${record.boxes ? ` · ${record.boxes}` : ''}${photos.length ? ` · фото: ${photos.length}` : ''}`, {});
+      logAction(`Приёмка машины ${record.truck}${record.boxes ? ` · ${record.boxes}` : ''}${incomeQty ? ` · приход ${incomeQty} шт.` : ''}${photos.length ? ` · фото ${photos.length}` : ''}`, incomeIds.length ? { incomes: incomeIds } : {});
       setRecvTruck(''); setRecvCarrier(''); setRecvBoxes(''); setRecvNote('');
       setRecvTruckPhotos([]); setRecvCargoPhotos([]); setRecvProgress('');
-      alert('Приёмка сохранена.');
+      setRecvIncome(null); setRecvIncomeErr('');
+      alert('Приёмка сохранена.' + (incomeQty ? ` Приход: ${incomeQty} шт.` : ''));
     } catch (e) {
       console.error(e);
       const msg = (e && e.message) || String(e);
@@ -1271,12 +1327,18 @@ function SkladLedger() {
     }
   }
   async function deleteReceiving(rec) {
-    if (!window.confirm(`Удалить запись приёмки машины ${rec.truck} от ${fmtDate(rec.date)}? Фото тоже удалятся.`)) return;
+    const hasIncome = rec.incomeIds && rec.incomeIds.length;
+    const warn = `Удалить запись приёмки машины ${rec.truck} от ${fmtDate(rec.date)}?\nФото удалятся.` +
+      (hasIncome ? `\nСвязанный приход (${rec.incomeQty || 0} шт.) тоже удалится — остаток уменьшится.` : '');
+    if (!window.confirm(warn)) return;
     try {
       if (rec.photos && rec.photos.length) {
         await window.supabase.storage.from(RECEIVING_BUCKET).remove(rec.photos.map(p => p.path));
       }
     } catch (e) { console.error('remove photos failed', e); }
+    if (hasIncome) {
+      await persist(KEY_INCOMES, incomes.filter(i => !rec.incomeIds.includes(i.id)), setIncomes);
+    }
     persist(KEY_RECEIVING, receiving.filter(x => x.id !== rec.id), setReceiving);
   }
   function buildTzWordBlob(rowsData, date, note, warehouse) {
@@ -2383,6 +2445,17 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 } },
         recvPhotoField('Фото машины', recvTruckPhotos, setRecvTruckPhotos),
         recvPhotoField('Фото загрузки в фуре', recvCargoPhotos, setRecvCargoPhotos)),
+      recvField('Товар, пришедший этой машиной (создаёт приход/остаток) — необязательно',
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement("label", { className: "skl-btn skl-btn-ghost", style: { cursor: 'pointer' } },
+            /*#__PURE__*/React.createElement(FileSpreadsheet, { size: 14 }),
+            recvIncome
+              ? ` ✓ ${recvIncome.fileName} — ${recvIncome.entries.length} позиций, ${recvIncome.entries.reduce((s, e) => s + e.qty, 0)} шт.`
+              : ' Загрузить файл прихода (артикул, размер, количество)',
+            /*#__PURE__*/React.createElement("input", { type: "file", accept: ".xlsx,.xls,.csv", style: { display: 'none' }, onChange: e => handleRecvIncomeFile(e.target.files[0]) })),
+          recvIncome && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { marginLeft: 8, color: 'var(--negative)' }, onClick: () => { setRecvIncome(null); setRecvIncomeErr(''); } }, "Убрать"),
+          recvIncomeErr && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginTop: 6 } }, recvIncomeErr)),
+        { marginBottom: 16 }),
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: recvSaving, onClick: submitReceiving }, recvSaving ? "Сохраняю…" : "Сохранить приёмку"),
         recvProgress && /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } }, recvProgress))),
@@ -2395,7 +2468,8 @@ function SkladLedger() {
                 /*#__PURE__*/React.createElement("div", null,
                   /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 16, fontWeight: 700 } }, "🚚 ", rec.truck),
                   /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } },
-                    fmtDate(rec.date), rec.carrier ? ` · ${rec.carrier}` : '', rec.boxes ? ` · ${rec.boxes}` : '')),
+                    fmtDate(rec.date), rec.carrier ? ` · ${rec.carrier}` : '', rec.boxes ? ` · ${rec.boxes}` : '',
+                    rec.incomeQty ? /*#__PURE__*/React.createElement("span", { style: { color: 'var(--positive)' } }, ` · приход ${rec.incomeQty} шт.`) : '')),
                 /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteReceiving(rec) },
                   /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить")),
               rec.note && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, marginTop: 8, color: 'var(--ink)' } }, rec.note),
