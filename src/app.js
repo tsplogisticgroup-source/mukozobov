@@ -1,3 +1,4 @@
+import { DUCK_VB, DUCK_PATH } from './duck.js';
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -2793,10 +2794,8 @@ function SkladLedger() {
   }, /*#__PURE__*/React.createElement("div", {
     className: "skl-logo",
     style: { width: 36, height: 36, borderRadius: 10 }
-  }, /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 64 64", width: 27, height: 27, fill: "none", stroke: "#F3F0DA", strokeWidth: 3.2, strokeLinecap: "round", strokeLinejoin: "round", xmlns: "http://www.w3.org/2000/svg" },
-    /*#__PURE__*/React.createElement("path", { d: "M20 14 C22 8 30 8 30 15 C42 15 50 24 49 34 C55 32 60 30 62 31 C58 35 54 38 51 39 C50 49 42 55 32 55 C21 55 13 48 14 39 C14 37 14 35 15 34 L5 35 L14 30 C13 23 15 17 20 14 Z" }),
-    /*#__PURE__*/React.createElement("path", { d: "M25 40 C30 46 40 46 45 39" }),
-    /*#__PURE__*/React.createElement("circle", { cx: 22, cy: 23, r: 1.9, fill: "#F3F0DA", stroke: "none" }))), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("svg", { viewBox: DUCK_VB, width: 28, height: 26, xmlns: "http://www.w3.org/2000/svg" },
+    /*#__PURE__*/React.createElement("path", { d: DUCK_PATH, fill: "#F3F0DA" }))), /*#__PURE__*/React.createElement("div", {
     className: "skl-display",
     style: { fontWeight: 700, fontSize: 14, letterSpacing: '0.02em' }
   }, "Носим сутками")), /*#__PURE__*/React.createElement("nav", {

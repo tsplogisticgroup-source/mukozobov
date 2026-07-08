@@ -77,7 +77,12 @@
       "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Приёмка машин: приход товара вместе с машиной' -m '- В форму приёмки добавлен файл прихода \\(артикул/размер/количество\\)' -m '- При сохранении создаётся приход \\(остаток\\), связанный с машиной \\(recvId\\)' -m '- Удаление приёмки удаляет связанный приход \\(с предупреждением\\)' -m '- В карточке журнала показывается приход, шт.' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
       "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Дизайн: тема «Носим сутками» \\(коричнево-оливково-золотая\\) + утка-логотип' -m '- Новая палитра CSS-переменных \\(тёмная коричневая + светлая кремовая\\)' -m '- Утка \\(SVG\\) вместо коробки: сайдбар, экран входа, фавиконка вкладки' -m '- Оливковая плашка логотипа, золотые кнопки с тёмным текстом' -m '- Бренд «Носим сутками» в сайдбаре и на входе' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
       "Bash(py --version)",
-      "Bash(python -c \"import PIL, numpy, scipy; print\\('PIL', PIL.__version__, '| numpy', numpy.__version__, '| scipy ok'\\)\")"
+      "Bash(python -c \"import PIL, numpy, scipy; print\\('PIL', PIL.__version__, '| numpy', numpy.__version__, '| scipy ok'\\)\")",
+      "Bash(cd \"C:/Users/imya/Desktop/WMS для муказа\" *)",
+      "PowerShell($env:Path = [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"Path\",\"User\"\\); Set-Location \"C:\\\\Users\\\\imya\\\\Desktop\\\\WMS для муказа\"; npm install --no-save potrace sharp 2>&1 | Select-String -Pattern \"added|error|warn deprecated\" | Select-Object -First 5)",
+      "Bash(echo \"=== свежие изображения за последние 15 минут \\(везде\\) ===\" *)",
+      "Bash(rm -rf _duck)",
+      "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Логотип: точная векторная утка \\(обводка фирменного лого с фото\\)' -m '- src/duck.js — путь утки, обведённый potrace по реальному логотипу' -m '- Заменена нарисованная утка в сайдбаре, экране входа и фавиконке' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

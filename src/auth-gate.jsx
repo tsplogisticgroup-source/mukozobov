@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './config.js';
+import { DUCK_VB, DUCK_PATH } from './duck.js';
 
 // «Ворота» доступа: пока пользователь не вошёл — показываем форму входа.
 // После успешного входа показываем само приложение (children).
@@ -68,10 +69,8 @@ export default function AuthGate({ children }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: '0 8px 22px -8px rgba(0,0,0,.6)',
           }}>
-            <svg viewBox="0 0 64 64" width={34} height={34} fill="none" stroke="#F3F0DA" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
-              <path d="M20 14 C22 8 30 8 30 15 C42 15 50 24 49 34 C55 32 60 30 62 31 C58 35 54 38 51 39 C50 49 42 55 32 55 C21 55 13 48 14 39 C14 37 14 35 15 34 L5 35 L14 30 C13 23 15 17 20 14 Z" />
-              <path d="M25 40 C30 46 40 46 45 39" />
-              <circle cx="22" cy="23" r="1.9" fill="#F3F0DA" stroke="none" />
+            <svg viewBox={DUCK_VB} width={36} height={34} xmlns="http://www.w3.org/2000/svg">
+              <path d={DUCK_PATH} fill="#F3F0DA" />
             </svg>
           </div>
           <div>
