@@ -1850,7 +1850,11 @@ function SkladLedger() {
       const consumption = [];
       for (const p of photoAvail) {
         if (need <= 0) break;
-        if (p.article === d.article && p.size === d.size && p.available > 0 && p.date <= aktDate) {
+        // Брак часто без размера (пересорт), поэтому при неизвестном размере
+        // сверяем только по артикулу. Дату не требуем: списать на фотостудию можно
+        // и после получения акта (обычный рабочий порядок).
+        const sizeOk = d.size === NO_SIZE || p.size === d.size;
+        if (p.article === d.article && sizeOk && p.available > 0) {
           const take = Math.min(need, p.available);
           p.available -= take;
           matched += take;
