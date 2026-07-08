@@ -2795,7 +2795,7 @@ function SkladLedger() {
     className: "skl-logo",
     style: { width: 36, height: 36, borderRadius: 10 }
   }, /*#__PURE__*/React.createElement("svg", { viewBox: DUCK_VB, width: 28, height: 26, xmlns: "http://www.w3.org/2000/svg" },
-    /*#__PURE__*/React.createElement("path", { d: DUCK_PATH, fill: "#F3F0DA" }))), /*#__PURE__*/React.createElement("div", {
+    /*#__PURE__*/React.createElement("path", { d: DUCK_PATH, fill: "#F3F0DA", fillRule: "evenodd" }))), /*#__PURE__*/React.createElement("div", {
     className: "skl-display",
     style: { fontWeight: 700, fontSize: 14, letterSpacing: '0.02em' }
   }, "Носим сутками")), /*#__PURE__*/React.createElement("nav", {

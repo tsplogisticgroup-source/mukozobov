@@ -70,7 +70,7 @@ export default function AuthGate({ children }) {
             boxShadow: '0 8px 22px -8px rgba(0,0,0,.6)',
           }}>
             <svg viewBox={DUCK_VB} width={36} height={34} xmlns="http://www.w3.org/2000/svg">
-              <path d={DUCK_PATH} fill="#F3F0DA" />
+              <path d={DUCK_PATH} fill="#F3F0DA" fillRule="evenodd" />
             </svg>
           </div>
           <div>
