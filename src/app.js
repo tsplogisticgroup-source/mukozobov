@@ -3974,7 +3974,10 @@ function SkladLedger() {
     if (!data) return null;
     const totalQty = data.sizes.reduce((s, x) => s + x.qty, 0);
     const refBoxes = totalQty / 8;
-    const grid = [...data.sizes].sort((a, b) => a.size - b.size).map(s => `${s.size}×${Math.round(s.qty / refBoxes)}`).join(', ');
+    const sortedSizes = [...data.sizes].sort((a, b) => a.size - b.size);
+    const grid = refBoxes > 0
+      ? sortedSizes.map(s => `${s.size}×${Math.round(s.qty / refBoxes)}`).join(', ')
+      : sortedSizes.map(s => s.size).join(', ') + ' — нет остатка';
     return /*#__PURE__*/React.createElement("tr", {
       key: artStr,
       style: {
