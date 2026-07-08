@@ -1290,7 +1290,7 @@ function SkladLedger() {
         photos.push({ url: data.publicUrl, path, kind: all[i].kind });
       }
       // Приход товара, пришедшего этой машиной (создаёт остаток на складе).
-      let incomeIds = [], incomeQty = 0;
+      let incomeIds = [], incomeQty = 0, items = [];
       if (recvIncome && recvIncome.entries.length) {
         const newIncomes = recvIncome.entries.map(e => ({
           id: uid(), article: e.article, size: e.size, qty: e.qty,
@@ -1299,12 +1299,16 @@ function SkladLedger() {
         }));
         incomeIds = newIncomes.map(x => x.id);
         incomeQty = newIncomes.reduce((s, x) => s + x.qty, 0);
+        // Разбивка по артикулам: сколько пар и коробов (пары / 8) приехало
+        const byArticle = {};
+        recvIncome.entries.forEach(e => { byArticle[e.article] = (byArticle[e.article] || 0) + e.qty; });
+        items = Object.entries(byArticle).map(([article, qty]) => ({ article, qty, boxes: qty / BOX_SIZE })).sort((a, b) => b.qty - a.qty);
         await persist(KEY_INCOMES, [...incomes, ...newIncomes], setIncomes);
       }
       const record = {
         id, date: recvDate, truck: recvTruck.trim(), carrier: recvCarrier.trim(),
         boxes: recvBoxes, note: recvNote.trim(), photos,
-        incomeIds, incomeCount: incomeIds.length, incomeQty,
+        incomeIds, incomeCount: incomeIds.length, incomeQty, items,
         addedAt: new Date().toISOString(), createdBy: role
       };
       await persist(KEY_RECEIVING, [record, ...receiving], setReceiving);
@@ -1340,6 +1344,17 @@ function SkladLedger() {
       await persist(KEY_INCOMES, incomes.filter(i => !rec.incomeIds.includes(i.id)), setIncomes);
     }
     persist(KEY_RECEIVING, receiving.filter(x => x.id !== rec.id), setReceiving);
+  }
+  // Разбивка приёмки по артикулам: из сохранённого record.items, а если его нет
+  // (старые записи) — считаем из связанного прихода.
+  function receivingItems(rec) {
+    if (rec.items && rec.items.length) return rec.items;
+    if (rec.incomeIds && rec.incomeIds.length) {
+      const byArticle = {};
+      incomes.filter(i => rec.incomeIds.includes(i.id)).forEach(i => { byArticle[i.article] = (byArticle[i.article] || 0) + i.qty; });
+      return Object.entries(byArticle).map(([article, qty]) => ({ article, qty, boxes: qty / BOX_SIZE })).sort((a, b) => b.qty - a.qty);
+    }
+    return [];
   }
   function buildTzWordBlob(rowsData, date, note, warehouse) {
     const rows = rowsData.map(r => `
@@ -2473,6 +2488,14 @@ function SkladLedger() {
                 /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteReceiving(rec) },
                   /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить")),
               rec.note && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, marginTop: 8, color: 'var(--ink)' } }, rec.note),
+              receivingItems(rec).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 10 } },
+                /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)', marginBottom: 6 } }, `Приехало (${receivingItems(rec).length} арт.):`),
+                /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+                  receivingItems(rec).map((it, i) => /*#__PURE__*/React.createElement("span", {
+                    key: i,
+                    style: { fontSize: 12.5, background: 'var(--card-2)', border: '1px solid var(--line)', borderRadius: 8, padding: '4px 9px' }
+                  }, /*#__PURE__*/React.createElement("span", { className: "skl-mono", style: { color: 'var(--accent)' } }, it.article),
+                    ` · ${formatBoxes(it.boxes)} кор · ${it.qty} шт`)))),
               rec.photos && rec.photos.length > 0 && /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 } },
                 rec.photos.map((p, i) => /*#__PURE__*/React.createElement("img", {
                   key: i, src: p.url, alt: p.kind, title: p.kind === 'truck' ? 'Фото машины' : 'Фото загрузки',
