@@ -68,12 +68,10 @@ export default function AuthGate({ children }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: '0 8px 22px -8px rgba(0,0,0,.6)',
           }}>
-            <svg viewBox="0 0 24 24" width={30} height={30} xmlns="http://www.w3.org/2000/svg">
-              <ellipse cx="10.5" cy="15" rx="7" ry="4.8" fill="#F5F0E4" />
-              <path d="M4 13.4 L1.6 12.6 L4.3 16.2 Z" fill="#F5F0E4" />
-              <circle cx="15.5" cy="9.5" r="3.6" fill="#F5F0E4" />
-              <path d="M18.6 8.9 L22.6 9.9 L18.6 11.1 Z" fill="#E8A23C" />
-              <circle cx="16.5" cy="8.7" r="0.9" fill="#3A3320" />
+            <svg viewBox="0 0 64 64" width={34} height={34} fill="none" stroke="#F3F0DA" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" xmlns="http://www.w3.org/2000/svg">
+              <path d="M20 14 C22 8 30 8 30 15 C42 15 50 24 49 34 C55 32 60 30 62 31 C58 35 54 38 51 39 C50 49 42 55 32 55 C21 55 13 48 14 39 C14 37 14 35 15 34 L5 35 L14 30 C13 23 15 17 20 14 Z" />
+              <path d="M25 40 C30 46 40 46 45 39" />
+              <circle cx="22" cy="23" r="1.9" fill="#F3F0DA" stroke="none" />
             </svg>
           </div>
           <div>
