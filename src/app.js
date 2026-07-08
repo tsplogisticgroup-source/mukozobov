@@ -756,7 +756,7 @@ function SkladLedger() {
   useEffect(() => {
     try {
       localStorage.setItem('sklad_theme', darkMode ? 'dark' : 'light');
-      document.body.style.background = darkMode ? '#14131C' : '#F3F4FB';
+      document.body.style.background = darkMode ? '#181510' : '#F5EFE1';
     } catch (_unused3) {}
   }, [darkMode]);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -2505,45 +2505,45 @@ function SkladLedger() {
   return /*#__PURE__*/React.createElement("div", {
     className: "skl-root",
     style: _objectSpread(_objectSpread({}, darkMode ? {
-      // «Полночь» — тёмный фон, фиолетовый акцент
-      '--paper': '#14131C',
-      '--card': '#1E1D2B',
-      '--card-2': '#26243A',
-      '--ink': '#EDEBF5',
-      '--ink-soft': '#8E8AAE',
-      '--line': '#2E2C40',
-      '--accent': '#7C5CFF',
-      '--accent-soft': '#2C2547',
-      '--positive': '#34E0A1',
-      '--positive-soft': '#16332B',
-      '--negative': '#FF6B6B',
-      '--negative-soft': '#3A1E22',
-      '--warn': '#F0B968',
-      '--warn-soft': '#3A2E18',
-      '--info': '#5FA8E0',
-      '--info-soft': '#1B2C3A',
-      '--row-hover': '#26243A',
-      '--input-bg': '#181724'
+      // «Носим сутками» — тёмно-коричневый фон, оливка, золотой акцент
+      '--paper': '#181510',
+      '--card': '#221E17',
+      '--card-2': '#2C271E',
+      '--ink': '#EFE7D6',
+      '--ink-soft': '#9B9078',
+      '--line': '#393226',
+      '--accent': '#D9A441',
+      '--accent-soft': '#3A2E16',
+      '--positive': '#8FB05A',
+      '--positive-soft': '#242E16',
+      '--negative': '#D06A4A',
+      '--negative-soft': '#3A241B',
+      '--warn': '#E0B24A',
+      '--warn-soft': '#3A2E14',
+      '--info': '#7FA39A',
+      '--info-soft': '#1E2A27',
+      '--row-hover': '#2A2519',
+      '--input-bg': '#1E1A14'
     } : {
-      // Светлая тема в той же фиолетовой гамме (индиго)
-      '--paper': '#F3F4FB',
-      '--card': '#FFFFFF',
-      '--card-2': '#F6F6FC',
-      '--ink': '#1B1B2E',
-      '--ink-soft': '#6E708A',
-      '--line': '#E6E8F4',
-      '--accent': '#4F46E5',
-      '--accent-soft': '#ECEBFB',
-      '--positive': '#1FA875',
-      '--positive-soft': '#E2F3EC',
-      '--negative': '#D14366',
-      '--negative-soft': '#FBE5EA',
-      '--warn': '#B5870A',
-      '--warn-soft': '#F7EDD0',
-      '--info': '#3F5B73',
-      '--info-soft': '#E5ECF2',
-      '--row-hover': '#F7F7FC',
-      '--input-bg': '#FFFFFF'
+      // Светлая тема в той же тёплой гамме (кремовая + золото)
+      '--paper': '#F5EFE1',
+      '--card': '#FFFDF7',
+      '--card-2': '#F0E9D8',
+      '--ink': '#2C2519',
+      '--ink-soft': '#8A8067',
+      '--line': '#E3D9C2',
+      '--accent': '#B8862B',
+      '--accent-soft': '#F3E6C8',
+      '--positive': '#5E7A2E',
+      '--positive-soft': '#E8EFD6',
+      '--negative': '#B24A2E',
+      '--negative-soft': '#F6E1D6',
+      '--warn': '#A9791A',
+      '--warn-soft': '#F5E9C8',
+      '--info': '#4A6E68',
+      '--info-soft': '#E2ECEA',
+      '--row-hover': '#FAF6EC',
+      '--input-bg': '#FFFDF7'
     }), {}, {
       fontFamily: "'Inter', sans-serif",
       background: 'var(--paper)',
@@ -2580,7 +2580,7 @@ function SkladLedger() {
           transition: transform .08s ease, background .15s ease, border-color .15s ease, filter .15s ease;
         }
         .skl-btn:active { transform: scale(0.97); }
-        .skl-btn-primary { background: var(--accent); color: #fff; box-shadow: 0 4px 14px -4px var(--accent); }
+        .skl-btn-primary { background: var(--accent); color: #241D0E; box-shadow: 0 4px 14px -6px rgba(0,0,0,.5); }
         .skl-btn-primary:hover { filter: brightness(1.1); }
         .skl-btn-ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
         .skl-btn-ghost:hover { background: var(--card-2); border-color: var(--accent); }
@@ -2594,8 +2594,8 @@ function SkladLedger() {
         }
         .skl-logo {
           width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center;
-          justify-content: center; color: #fff; background: var(--accent);
-          box-shadow: 0 6px 18px -5px var(--accent);
+          justify-content: center; color: #fff; background: #8A8268;
+          box-shadow: 0 6px 18px -6px rgba(0,0,0,.5);
         }
         .skl-divider { border: none; border-top: 1px solid var(--line); margin: 20px 0; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -2792,11 +2792,16 @@ function SkladLedger() {
     className: "skl-side-logo"
   }, /*#__PURE__*/React.createElement("div", {
     className: "skl-logo",
-    style: { width: 34, height: 34, borderRadius: 10 }
-  }, /*#__PURE__*/React.createElement(Box, { size: 18 })), /*#__PURE__*/React.createElement("div", {
+    style: { width: 36, height: 36, borderRadius: 10 }
+  }, /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 24 24", width: 24, height: 24, xmlns: "http://www.w3.org/2000/svg" },
+    /*#__PURE__*/React.createElement("ellipse", { cx: 10.5, cy: 15, rx: 7, ry: 4.8, fill: "#F5F0E4" }),
+    /*#__PURE__*/React.createElement("path", { d: "M4 13.4 L1.6 12.6 L4.3 16.2 Z", fill: "#F5F0E4" }),
+    /*#__PURE__*/React.createElement("circle", { cx: 15.5, cy: 9.5, r: 3.6, fill: "#F5F0E4" }),
+    /*#__PURE__*/React.createElement("path", { d: "M18.6 8.9 L22.6 9.9 L18.6 11.1 Z", fill: "#E8A23C" }),
+    /*#__PURE__*/React.createElement("circle", { cx: 16.5, cy: 8.7, r: 0.9, fill: "#3A3320" }))), /*#__PURE__*/React.createElement("div", {
     className: "skl-display",
-    style: { fontWeight: 700, fontSize: 15 }
-  }, "Склад")), /*#__PURE__*/React.createElement("nav", {
+    style: { fontWeight: 700, fontSize: 14, letterSpacing: '0.02em' }
+  }, "Носим сутками")), /*#__PURE__*/React.createElement("nav", {
     style: { display: 'flex', flexDirection: 'column', gap: 7 }
   }, navItems.map(n => /*#__PURE__*/React.createElement("button", {
     key: n.key,
