@@ -381,6 +381,7 @@ function parseAkt(workbook, fileName) {
   }
   const items = [];
   const names = {};
+  const unidentifiedItems = [];
   let unidentified = 0;
   for (let i = headerIdx + 1; i < json.length; i++) {
     const r = json[i];
@@ -403,8 +404,9 @@ function parseAkt(workbook, fileName) {
         qty
       });
     } else {
-      // Строка с количеством, но без артикула продавца — неопознанный товар
+      // Строка с количеством, но без артикула продавца — неопознанный товар (обезличка)
       unidentified += qty;
+      if (box) unidentifiedItems.push({ box: String(box).trim(), qty });
     }
   }
   if (!items.length && !unidentified) return null;
@@ -414,36 +416,45 @@ function parseAkt(workbook, fileName) {
     items,
     names,
     unidentified,
+    unidentifiedItems,
     fileName
   };
 }
 
-// Группирует по коробам, находит "штатный" состав короба на артикул
-// и сравнивает с неполными коробами, чтобы найти размер брака
-function analyzeAkt(items) {
-  const boxes = {};
+// Брак = недостача пар по ВСЕЙ поставке: (кол-во коробов × 8) − (опознано + обезличка).
+// 1 короб = 1 ШК короба = 8 пар. Обезличка (неопознанный товар) — это тоже реальные
+// пары, поэтому засчитывается в наполнение короба и НЕ пересекается с браком.
+// Пересорт (пары «переехали» между коробами/размерами) сам себя компенсирует в общем
+// итоге. Оставшуюся недостачу распределяем на неполные короба (размер неизвестен).
+function analyzeAkt(akt) {
+  const items = akt.items || [];
+  const uniItems = akt.unidentifiedItems || [];
+  const boxes = {}; // box -> { article, ident, uni }
   items.forEach(it => {
-    if (!boxes[it.box]) boxes[it.box] = {
-      article: it.article,
-      sizes: {}
-    };
-    boxes[it.box].sizes[it.size] = (boxes[it.box].sizes[it.size] || 0) + it.qty;
+    if (!boxes[it.box]) boxes[it.box] = { article: it.article, ident: 0, uni: 0 };
+    if (!boxes[it.box].article) boxes[it.box].article = it.article;
+    boxes[it.box].ident += it.qty;
   });
-  // Брак определяем по ИТОГУ артикула: (кол-во коробов × 8) − (отгружено пар).
-  // 1 короб = 1 ШК короба = 8 пар. Если суммарно пар столько, сколько коробов×8 —
-  // брака НЕТ, даже при пересорте (нестандартная раскладка размеров, в т.ч. когда
-  // в одном коробе больше, в другом меньше — они компенсируют друг друга).
-  // Размер недобора не определяем (при пересорте он неизвестен) — пишем на артикул.
-  const boxCountByArticle = {}, shippedByArticle = {};
-  Object.values(boxes).forEach(b => {
-    boxCountByArticle[b.article] = (boxCountByArticle[b.article] || 0) + 1;
-    shippedByArticle[b.article] = (shippedByArticle[b.article] || 0) + Object.values(b.sizes).reduce((a, c) => a + c, 0);
+  uniItems.forEach(u => {
+    if (!u.box) return;
+    if (!boxes[u.box]) boxes[u.box] = { article: null, ident: 0, uni: 0 };
+    boxes[u.box].uni += u.qty;
   });
-  const defectMap = {}; // article -> qty недобора
-  Object.keys(boxCountByArticle).forEach(article => {
-    const short = boxCountByArticle[article] * BOX_SIZE - shippedByArticle[article];
-    if (short > 0) defectMap[article] = short;
-  });
+  const boxIds = Object.keys(boxes);
+  const totalIdent = items.reduce((s, it) => s + it.qty, 0);
+  const totalUni = uniItems.reduce((s, u) => s + u.qty, 0);
+  let globalShort = Math.max(0, boxIds.length * BOX_SIZE - totalIdent - totalUni);
+  const defectMap = {}; // article -> qty
+  const shortBoxes = boxIds
+    .map(id => ({ id, article: boxes[id].article, fill: boxes[id].ident + boxes[id].uni }))
+    .filter(b => b.fill < BOX_SIZE && b.article)
+    .sort((a, b) => (a.fill - b.fill) || a.id.localeCompare(b.id));
+  for (const b of shortBoxes) {
+    if (globalShort <= 0) break;
+    const take = Math.min(BOX_SIZE - b.fill, globalShort);
+    defectMap[b.article] = (defectMap[b.article] || 0) + take;
+    globalShort -= take;
+  }
   const totalsMap = {};
   items.forEach(it => {
     const key = `${it.article}|||${it.size}`;
@@ -465,7 +476,7 @@ function analyzeAkt(items) {
       size: NO_SIZE,
       qty
     })),
-    boxCount: Object.keys(boxes).length
+    boxCount: boxIds.length
   };
 }
 function LabelPrintView({
@@ -1871,7 +1882,7 @@ function SkladLedger() {
         if (kind === 'shipment') {
           const akt = parseAkt(wb, file.name);
           if (akt) {
-            const analysis = analyzeAkt(akt.items);
+            const analysis = analyzeAkt(akt);
             const enrichedDefects = enrichDefectsWithPhoto(analysis.defects, akt.date);
             setAktPreview(_objectSpread(_objectSpread(_objectSpread({}, akt), analysis), {}, {
               defects: enrichedDefects
