@@ -1769,13 +1769,22 @@ function SkladLedger() {
       const res = await fetch(WB_PROXY_URL);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setBarcodes(data.articles || {});
+      const wbArticles = data.articles || {};
+      // Нормализуем данные WB в каталог этикеток: ключ = код (первый токен артикула WB),
+      // берём название, бренд и размеры → штрихкоды. Тот же формат, что каталог из Excel.
+      const cat = {};
+      for (const [vendorCode, v] of Object.entries(wbArticles)) {
+        const code = String(vendorCode).trim().split(/\s+/)[0];
+        if (!code) continue;
+        if (!cat[code]) cat[code] = { name: (v && v.name) || '', color: '', brand: (v && v.brand) || '', sizes: {} };
+        for (const [size, bc] of Object.entries((v && v.sizes) || {})) {
+          if (bc && !cat[code].sizes[size]) cat[code].sizes[size] = String(bc);
+        }
+      }
+      if (!Object.keys(cat).length) throw new Error('WB вернул пустой каталог.');
+      await persist(KEY_CATALOG, cat, setCatalog);
       setBarcodesSyncedAt(data.syncedAt || new Date().toISOString());
-      await window.storage.set(KEY_BARCODES, JSON.stringify({
-        articles: data.articles || {},
-        syncedAt: data.syncedAt
-      }));
-      logAction(`Синхронизация штрихкодов WB: ${Object.keys(data.articles || {}).length} артикулов`, {});
+      logAction(`Синхронизация с WB: ${Object.keys(cat).length} артикулов`, {});
     } catch (e) {
       console.error(e);
       setSyncError('Не удалось получить данные от WB: ' + (e.message || e));
@@ -4057,7 +4066,7 @@ function SkladLedger() {
       marginTop: 0,
       marginBottom: 16
     }
-  }, "Загрузи каталог товаров (Название, Баркод, Артикул, Размер). Он сохраняется в базе — достаточно загрузить один раз. Дальше выбирай артикулы и указывай количество коробов."), /*#__PURE__*/React.createElement("div", {
+  }, "Синхронизируй каталог напрямую с Wildberries (кнопка ниже) — названия, штрихкоды и размеры подтянутся автоматически. Или загрузи файл каталога вручную. Каталог сохраняется в базе."), /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 16
     }
@@ -4078,7 +4087,17 @@ function SkladLedger() {
       handleLabelFile(e.target.files[0]);
       setLabelSelected([]);
     }
-  }))), labelError && /*#__PURE__*/React.createElement("div", {
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "skl-btn skl-btn-primary",
+    disabled: syncingBarcodes,
+    onClick: syncBarcodes
+  }, /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), syncingBarcodes ? " Синхронизирую…" : " Синхронизировать с WB"), barcodesSyncedAt && /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 12, color: 'var(--ink-soft)' }
+  }, "обновлено с WB: ", fmtDate(String(barcodesSyncedAt).slice(0, 10))), syncError && /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 12, color: 'var(--negative)' }
+  }, syncError)), labelError && /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 12,
       padding: 10,
