@@ -2110,6 +2110,22 @@ function SkladLedger() {
     reader.readAsText(file);
     e.target.value = '';
   }
+  // Двойные артикулы: строка вида «283-7 = D6167-8P» — один товар под двумя кодами.
+  // Строим индекс: каждый код -> каноничная (двойная) строка. Любой одиночный код,
+  // совпадающий с частью двойного, сводится к тому же артикулу (не плодим дубли/минус).
+  const aliasIndex = useMemo(() => {
+    const idx = {};
+    [...incomes, ...shipments, ...defects, ...photo].forEach(it => {
+      const a = (it.article || '').trim();
+      if (a.includes('=')) a.split(/\s*=\s*/).map(s => s.trim()).filter(Boolean).forEach(c => { idx[c] = a; });
+    });
+    return idx;
+  }, [incomes, shipments, defects, photo]);
+  const canonArticle = a => {
+    a = (a || '').trim();
+    if (!a || a.includes('=')) return a;
+    return aliasIndex[a] || a;
+  };
   const summary = useMemo(() => {
     const articleMap = {};
     const ensure = article => {
@@ -2135,22 +2151,22 @@ function SkladLedger() {
       return a.sizes[key];
     };
     incomes.forEach(i => {
-      const a = ensure(i.article);
+      const a = ensure(canonArticle(i.article));
       a.income += i.qty;
       ensureSize(a, i.size).income += i.qty;
     });
     shipments.forEach(s => {
-      const a = ensure(s.article);
+      const a = ensure(canonArticle(s.article));
       a.shipped += s.qty;
       ensureSize(a, s.size).shipped += s.qty;
     });
     defects.forEach(d => {
-      const a = ensure(d.article);
+      const a = ensure(canonArticle(d.article));
       a.defect += d.qty;
       ensureSize(a, d.size).defect += d.qty;
     });
     photo.forEach(p => {
-      const a = ensure(p.article);
+      const a = ensure(canonArticle(p.article));
       a.photo += p.qty;
       ensureSize(a, p.size).photo += p.qty;
     });
@@ -2172,7 +2188,7 @@ function SkladLedger() {
     const out = {};
     for (const code of Object.keys(catalog)) {
       const c = catalog[code];
-      const stock = summary.find(s => s.article === code);
+      const stock = summary.find(s => s.article === canonArticle(code));
       out[code] = {
         code,
         name: c.name || '',
@@ -2211,7 +2227,7 @@ function SkladLedger() {
     })));
   }, [photoArticleOptions]);
   function balanceForArticle(article) {
-    const found = summary.find(s => s.article === article);
+    const found = summary.find(s => s.article === canonArticle(article));
     return found ? found.balance : 0;
   }
   const totals = useMemo(() => ({

@@ -86,7 +86,11 @@
       "Bash(\"C:/Program Files/nodejs/node.exe\" -e \"let fs=require\\('fs'\\);let h=fs.readFileSync\\('index.html','utf8'\\);let b=h;h=h.replace\\(\\\\\"%3Cpath fill='%23F3F0DA' d='\\\\\",\\\\\"%3Cpath fill='%23F3F0DA' fill-rule='evenodd' d='\\\\\"\\);fs.writeFileSync\\('index.html',h\\);console.log\\('favicon changed:', h!==b\\);\")",
       "Bash(mkdir -p _duck)",
       "Bash('C:/Program Files/nodejs/node.exe' -e ' *)",
-      "Bash(\"C:/Program Files/nodejs/node.exe\" _akt.cjs)"
+      "Bash(\"C:/Program Files/nodejs/node.exe\" _akt.cjs)",
+      "Bash(grep -n '\" = \"\\\\| = \\\\|=\\\\s*\\\\${\\\\|aliases\\\\|alias\\\\|двойн' src/app.js)",
+      "Bash(grep -iv \"===\\\\|!==\\\\|=>\\\\|<=\\\\|>=\\\\| = useState\\\\| = use\\\\| = {\\\\| = \\\\[\\\\| = \\(\\\\| = function\\\\| = async\\\\| = new \\\\| = Object\\\\| = Array\\\\| = String\\\\| = Number\\\\| = Math\\\\| = JSON\\\\| = null\\\\| = true\\\\| = false\\\\| = ''\\\\| = \\\\`\")",
+      "Bash(grep -n \"split\\(/\\\\[\\\\\\\\\\\\\\\\s=\\\\|split\\('='\\)\\\\|split\\(\\\\\"=\\\\\"\\)\\\\|\\\\[\\\\\\\\\\\\\\\\s=\\\\]\" src/app.js)",
+      "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Двойные артикулы: сведение алиасов \\(X = Y\\) в один по совпадению любого кода' -m '- aliasIndex: код -> каноничная двойная строка; canonArticle\\(\\) приводит одиночный код к двойному' -m '- Остатки, этикетки и баланс используют канонический артикул — нет дублей и минуса' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }
