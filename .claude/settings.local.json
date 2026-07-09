@@ -93,7 +93,10 @@
       "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Двойные артикулы: сведение алиасов \\(X = Y\\) в один по совпадению любого кода' -m '- aliasIndex: код -> каноничная двойная строка; canonArticle\\(\\) приводит одиночный код к двойному' -m '- Остатки, этикетки и баланс используют канонический артикул — нет дублей и минуса' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
       "Bash(cp /tmp/uni.cjs _uni.cjs)",
       "Bash(\"C:/Program Files/nodejs/node.exe\" _uni.cjs)",
-      "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Отгрузка: обезличка = отгружено \\(списывается с остатка по артикулу короба\\)' -m '- analyzeAkt: unidentifiedShipments \\(обезличка по артикулу короба\\) + unidentifiedNoArticle' -m '- confirmAkt: обезличка с артикулом → отгрузка \\(size —, note «обезличка»\\); без артикула → неопознано' -m '- Обезличка больше не остаётся мнимым остатком на складе' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
+      "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Отгрузка: обезличка = отгружено \\(списывается с остатка по артикулу короба\\)' -m '- analyzeAkt: unidentifiedShipments \\(обезличка по артикулу короба\\) + unidentifiedNoArticle' -m '- confirmAkt: обезличка с артикулом → отгрузка \\(size —, note «обезличка»\\); без артикула → неопознано' -m '- Обезличка больше не остаётся мнимым остатком на складе' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')",
+      "Bash(rm -f /tmp/uni.cjs)",
+      "Bash(grep -n '\" пар\"\\\\|\" + \"\\\\|пар`\\\\|пар\"\\\\|noSizeBalance\\\\|NO_SIZE.*balance\\\\|balance.*NO_SIZE' src/app.js)",
+      "Bash(git -c user.name=Mukozobov -c user.email=tsplogisticgroup@gmail.com commit -q -m 'Отгрузка: пересорт сводится к целым коробам \\(нет +1/-1 на остатках\\)' -m '- analyzeAkt: перебор одного артикула гасит недобор другого \\(rebalanceShipments, ± коррекции\\)' -m '- Чистая недостача по поставке = брак; обезличка засчитана в наполнение' -m '- confirmAkt пишет пересорт-коррекции служебными отгрузками \\(size —\\)' -m '- Каждый артикул сводится к отгружено+брак = коробов×8, без хвостов' -m 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>')"
     ]
   }
 }

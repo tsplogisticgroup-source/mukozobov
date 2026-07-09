@@ -443,18 +443,30 @@ function analyzeAkt(akt) {
   const boxIds = Object.keys(boxes);
   const totalIdent = items.reduce((s, it) => s + it.qty, 0);
   const totalUni = uniItems.reduce((s, u) => s + u.qty, 0);
-  let globalShort = Math.max(0, boxIds.length * BOX_SIZE - totalIdent - totalUni);
-  const defectMap = {}; // article -> qty
-  const shortBoxes = boxIds
-    .map(id => ({ id, article: boxes[id].article, fill: boxes[id].ident + boxes[id].uni }))
-    .filter(b => b.fill < BOX_SIZE && b.article)
-    .sort((a, b) => (a.fill - b.fill) || a.id.localeCompare(b.id));
-  for (const b of shortBoxes) {
-    if (globalShort <= 0) break;
-    const take = Math.min(BOX_SIZE - b.fill, globalShort);
-    defectMap[b.article] = (defectMap[b.article] || 0) + take;
-    globalShort -= take;
-  }
+  // Сводим каждый артикул к целым коробам: должно быть отгружено (коробов артикула × 8).
+  // Недобор одного артикула гасится перебором другого (пересорт), обезличка засчитана в
+  // наполнение. Остаток недобора по всей поставке = брак; коррекции пересорта пишем как
+  // служебные (не-)отгрузки, чтобы не оставалось «+1»/«−1» на остатках.
+  const perArt = {}; // article -> { boxes, ident, uni }
+  Object.values(boxes).forEach(b => {
+    if (!b.article) return;
+    if (!perArt[b.article]) perArt[b.article] = { boxes: 0, ident: 0, uni: 0 };
+    perArt[b.article].boxes += 1;
+    perArt[b.article].ident += b.ident;
+    perArt[b.article].uni += b.uni;
+  });
+  let netShort = Math.max(0, boxIds.length * BOX_SIZE - totalIdent - totalUni);
+  const gaps = Object.entries(perArt).map(([article, v]) => ({ article, gap: v.boxes * BOX_SIZE - v.ident - v.uni }));
+  const defectMap = {}; // article -> qty (брак)
+  const rebalanceMap = {}; // article -> qty пересорт-коррекции (может быть < 0)
+  gaps.filter(g => g.gap > 0).sort((a, b) => (b.gap - a.gap) || a.article.localeCompare(b.article)).forEach(g => {
+    const brak = Math.min(g.gap, netShort);
+    netShort -= brak;
+    if (brak > 0) defectMap[g.article] = (defectMap[g.article] || 0) + brak;
+    const pseudo = g.gap - brak; // недобор сверх брака — закрываем пересорт-отгрузкой
+    if (pseudo > 0) rebalanceMap[g.article] = (rebalanceMap[g.article] || 0) + pseudo;
+  });
+  gaps.filter(g => g.gap < 0).forEach(g => { rebalanceMap[g.article] = (rebalanceMap[g.article] || 0) + g.gap; });
   const totalsMap = {};
   items.forEach(it => {
     const key = `${it.article}|||${it.size}`;
@@ -489,6 +501,7 @@ function analyzeAkt(akt) {
     })),
     unidentifiedShipments: Object.entries(uniShipMap).map(([article, qty]) => ({ article, qty })),
     unidentifiedNoArticle: uniNoArticle,
+    rebalanceShipments: Object.entries(rebalanceMap).filter(([, q]) => q !== 0).map(([article, qty]) => ({ article, qty })),
     boxCount: boxIds.length
   };
 }
@@ -2027,7 +2040,20 @@ function SkladLedger() {
       note: 'обезличка (отгружено)',
       addedAt: new Date().toISOString()
     }));
-    const allShipEntries = [...shipEntries, ...uniShipEntries];
+    // Пересорт-коррекции: сводим артикулы к целым коробам (может быть отрицательным).
+    const rebalanceEntries = (aktPreview.rebalanceShipments || []).map(u => ({
+      id: uid(),
+      article: u.article,
+      size: NO_SIZE,
+      qty: u.qty,
+      date,
+      shipmentNumber,
+      warehouse: '',
+      fileName,
+      note: 'пересорт (коррекция до целых коробов)',
+      addedAt: new Date().toISOString()
+    }));
+    const allShipEntries = [...shipEntries, ...uniShipEntries, ...rebalanceEntries];
     persist(KEY_SHIPMENTS, [...shipments, ...allShipEntries], setShipments);
     const toRecord = defs.filter(d => Number(d.recordQty) > 0);
     let defEntries = [];
