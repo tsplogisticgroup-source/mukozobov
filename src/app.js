@@ -467,6 +467,17 @@ function analyzeAkt(akt) {
       size
     };
   };
+  // Обезличка = отгружено. Пара лежала в коробе своего артикула, WB её не опознал,
+  // но отгрузил → это отгрузка того артикула (размер неизвестен). Привязываем к артикулу
+  // короба; если короб без опознанного артикула — остаётся «неопознанной» отдельно.
+  const uniShipMap = {};
+  let uniNoArticle = 0;
+  Object.values(boxes).forEach(b => {
+    if (b.uni > 0) {
+      if (b.article) uniShipMap[b.article] = (uniShipMap[b.article] || 0) + b.uni;
+      else uniNoArticle += b.uni;
+    }
+  });
   return {
     totals: Object.entries(totalsMap).map(([k, qty]) => _objectSpread(_objectSpread({}, splitKey(k)), {}, {
       qty
@@ -476,6 +487,8 @@ function analyzeAkt(akt) {
       size: NO_SIZE,
       qty
     })),
+    unidentifiedShipments: Object.entries(uniShipMap).map(([article, qty]) => ({ article, qty })),
+    unidentifiedNoArticle: uniNoArticle,
     boxCount: boxIds.length
   };
 }
@@ -1987,7 +2000,8 @@ function SkladLedger() {
       defects: defs,
       fileName,
       names: aktNames,
-      unidentified: unidQty
+      unidentified: unidQty,
+      unidentifiedNoArticle: unidNoArt = 0
     } = aktPreview;
     const shipEntries = totals.map(t => ({
       id: uid(),
@@ -2000,7 +2014,21 @@ function SkladLedger() {
       fileName,
       addedAt: new Date().toISOString()
     }));
-    persist(KEY_SHIPMENTS, [...shipments, ...shipEntries], setShipments);
+    // Обезличка = отгружено: пишем как отгрузку артикула короба (размер неизвестен).
+    const uniShipEntries = (aktPreview.unidentifiedShipments || []).map(u => ({
+      id: uid(),
+      article: u.article,
+      size: NO_SIZE,
+      qty: u.qty,
+      date,
+      shipmentNumber,
+      warehouse: '',
+      fileName,
+      note: 'обезличка (отгружено)',
+      addedAt: new Date().toISOString()
+    }));
+    const allShipEntries = [...shipEntries, ...uniShipEntries];
+    persist(KEY_SHIPMENTS, [...shipments, ...allShipEntries], setShipments);
     const toRecord = defs.filter(d => Number(d.recordQty) > 0);
     let defEntries = [];
     if (toRecord.length) {
@@ -2031,13 +2059,13 @@ function SkladLedger() {
       persist(KEY_PHOTO, updatedPhoto, setPhoto);
     }
     let unidEntry = null;
-    if (unidQty > 0) {
+    if (unidNoArt > 0) {
       unidEntry = {
         id: uid(),
-        qty: unidQty,
+        qty: unidNoArt,
         date,
         shipmentNumber,
-        note: `неопознанный товар · поставка №${shipmentNumber}`,
+        note: `неопознанный товар (без короба/артикула) · поставка №${shipmentNumber}`,
         addedAt: new Date().toISOString()
       };
       persist(KEY_UNIDENTIFIED, [...unidentified, unidEntry], setUnidentified);
@@ -2045,13 +2073,15 @@ function SkladLedger() {
     if (aktNames && Object.keys(aktNames).length) {
       persist(KEY_NAMES, _objectSpread(_objectSpread({}, names), aktNames), setNames);
     }
-    const totalQty = shipEntries.reduce((s, e) => s + e.qty, 0);
+    const totalQty = allShipEntries.reduce((s, e) => s + e.qty, 0);
+    const uniShipQty = uniShipEntries.reduce((s, e) => s + e.qty, 0);
     const defQty = toRecord.reduce((s, d) => s + Number(d.recordQty), 0);
     let label = `Акт приёмки №${shipmentNumber} от ${fmtDate(date)}: отгружено ${totalQty} шт.`;
+    if (uniShipQty > 0) label += ` (в т.ч. обезличка ${uniShipQty})`;
     if (defQty > 0) label += `, брак ${defQty} шт.`;
-    if (unidQty > 0) label += `, неопознано ${unidQty} шт.`;
+    if (unidNoArt > 0) label += `, неопознано ${unidNoArt} шт.`;
     const refs = {
-      shipments: shipEntries.map(e => e.id)
+      shipments: allShipEntries.map(e => e.id)
     };
     if (defEntries.length) refs.defects = defEntries.map(e => e.id);
     if (unidEntry) refs.unidentified = [unidEntry.id];
@@ -3328,7 +3358,7 @@ function SkladLedger() {
     }
   }, /*#__PURE__*/React.createElement(AlertTriangle, {
     size: 16
-  }), " Неопознанный товар (без артикула продавца): ", aktPreview.unidentified, " шт. — будет учтён отдельно, без привязки к артикулу."), aktPreview.defects.length > 0 ? /*#__PURE__*/React.createElement("div", {
+  }), " Обезличка: ", aktPreview.unidentified, " шт. — учтётся как ОТГРУЗКА артикула короба (товар ушёл на WB, остаток уменьшится).", aktPreview.unidentifiedNoArticle > 0 ? ` Из них ${aktPreview.unidentifiedNoArticle} шт. без короба/артикула — отдельно.` : ''), aktPreview.defects.length > 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       marginBottom: 14,
       padding: 12,
