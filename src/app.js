@@ -2307,10 +2307,19 @@ function SkladLedger() {
   }
   // --- Размерная сетка по артикулу (какие размеры задвоены ×2) ---
   function articleCode(a) { return String(a || '').trim().split(/\s+/)[0]; }
-  function articleCategory(a) { const c = catalog[articleCode(a)]; return (c && c.category) || ''; }
+  // Коды артикула: для двойного «D1020-3 = 129-5» — оба (первый токен каждой части).
+  function articleCodes(a) {
+    return String(a || '').split(/\s*=\s*/).map(p => p.trim().split(/\s+/)[0]).filter(Boolean);
+  }
+  // Запись каталога по любому из кодов двойного артикула.
+  function catalogEntry(a) {
+    for (const code of articleCodes(a)) { if (catalog[code]) return catalog[code]; }
+    return null;
+  }
+  function articleCategory(a) { const c = catalogEntry(a); return (c && c.category) || ''; }
   function articleAllSizes(a) {
-    // размеры артикула: из каталога WB (по коду) или из остатка
-    const cat = catalog[articleCode(a)];
+    // размеры артикула: из каталога WB (по любому коду) или из остатка
+    const cat = catalogEntry(a);
     if (cat && cat.sizes && Object.keys(cat.sizes).length) {
       return Object.keys(cat.sizes).sort((x, y) => (Number(x) || 0) - (Number(y) || 0));
     }
