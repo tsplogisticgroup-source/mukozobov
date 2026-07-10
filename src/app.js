@@ -283,6 +283,7 @@ const KEY_BARCODES = 'sklad:wb_barcodes';
 const KEY_CATALOG = 'sklad:catalog';
 const KEY_RECEIVING = 'sklad:receiving';
 const RECEIVING_BUCKET = 'receiving';
+const KEY_GRIDS = 'sklad:grids';
 const ACTIONS_KEEP = 50;
 const KEY_LAST_BACKUP = 'sklad:meta:lastBackup';
 const BACKUP_PREFIX = 'sklad:backup:';
@@ -747,6 +748,7 @@ function SkladLedger() {
   const [labelFile, setLabelFile] = useState(null);
   const [labelArticles, setLabelArticles] = useState({});
   const [catalog, setCatalog] = useState({});
+  const [grids, setGrids] = useState({}); // code -> массив задвоенных размеров
   const [receiving, setReceiving] = useState([]);
   const [recvDate, setRecvDate] = useState(() => todayISO());
   const [recvTruck, setRecvTruck] = useState('');
@@ -983,6 +985,11 @@ function SkladLedger() {
       const r = await window.storage.get(KEY_RECEIVING, true);
       if (r) setReceiving(JSON.parse(r.value));
     } catch (_unusedRecv) {/* keep current data on error */}
+    try {
+      const r = await window.storage.get(KEY_GRIDS, true);
+      const val = r ? JSON.parse(r.value) : {};
+      setGrids(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
+    } catch (_unusedGrids) {/* keep current data on error */}
     setLoading(false);
   }
   async function persist(key, value, setter) {
@@ -1209,8 +1216,10 @@ function SkladLedger() {
         const data = labelArticles[code];
         if (!data || !data.sizes.length) { missing.push(code); continue; }
         const sizes = [...data.sizes].sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
-        const vec = distribute8(sizes.map(s => s.qty));
-        if (!vec) { missing.push(code); continue; }
+        // Если задана размерная сетка артикула — берём её; иначе распределяем по остатку.
+        const gv = gridVector(code);
+        const vec = gv ? sizes.map(s => gv[String(s.size)] || 0) : distribute8(sizes.map(s => s.qty));
+        if (!vec || vec.reduce((a, b) => a + b, 0) === 0) { missing.push(code); continue; }
         for (let b = 0; b < boxes; b++) {
           const wb = 'WB_' + boxNum++;
           if (!firstLabel) labelDoc.addPage([LWmm, LHmm], 'landscape');
@@ -2294,6 +2303,42 @@ function SkladLedger() {
   function balanceForArticle(article) {
     const found = summary.find(s => s.article === canonArticle(article));
     return found ? found.balance : 0;
+  }
+  // --- Размерная сетка по артикулу (какие размеры задвоены ×2) ---
+  function articleCode(a) { return String(a || '').trim().split(/\s+/)[0]; }
+  function articleAllSizes(a) {
+    // размеры артикула: из каталога WB (по коду) или из остатка
+    const cat = catalog[articleCode(a)];
+    if (cat && cat.sizes && Object.keys(cat.sizes).length) {
+      return Object.keys(cat.sizes).sort((x, y) => (Number(x) || 0) - (Number(y) || 0));
+    }
+    const s = summary.find(x => x.article === canonArticle(a));
+    return s ? s.sizes.map(z => String(z.size)).filter(z => z !== NO_SIZE)
+      .sort((x, y) => (Number(x) || 0) - (Number(y) || 0)) : [];
+  }
+  function gridDoubled(a) { return grids[articleCode(a)] || []; }
+  function toggleGridSize(a, size) {
+    const code = articleCode(a);
+    const cur = grids[code] || [];
+    const sz = String(size);
+    const next = cur.includes(sz) ? cur.filter(s => s !== sz) : [...cur, sz];
+    persist(KEY_GRIDS, _objectSpread(_objectSpread({}, grids), {}, { [code]: next }), setGrids);
+  }
+  function gridSum(a) {
+    const doubled = gridDoubled(a);
+    return articleAllSizes(a).reduce((s, sz) => s + (doubled.includes(String(sz)) ? 2 : 1), 0);
+  }
+  // Вектор пар на короб по сетке ({size: count}) или null, если сетка не задана/не равна 8.
+  function gridVector(a) {
+    const code = articleCode(a);
+    if (!(code in grids)) return null;
+    const doubled = grids[code] || [];
+    const sizes = articleAllSizes(a);
+    if (!sizes.length) return null;
+    const vec = {};
+    let sum = 0;
+    sizes.forEach(sz => { const c = doubled.includes(String(sz)) ? 2 : 1; vec[String(sz)] = c; sum += c; });
+    return sum === BOX_SIZE ? vec : null;
   }
   const totals = useMemo(() => ({
     sku: summary.length,
@@ -4961,6 +5006,29 @@ function SkladLedger() {
           background: 'var(--row-hover)'
         }
       }, /*#__PURE__*/React.createElement("div", {
+        style: { margin: '14px 0 6px' }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 12, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }
+      }, "Размерная сетка (короб = 8 пар · отметь задвоенные ×2)"), articleAllSizes(row.article).length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)' } }, "Нет размеров у артикула. Синхронизируй каталог с WB (раздел «Этикетки»).")
+        : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+            style: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }
+          }, articleAllSizes(row.article).map(sz => {
+            const doubled = gridDoubled(row.article).includes(String(sz));
+            return /*#__PURE__*/React.createElement("button", {
+              key: sz,
+              onClick: () => toggleGridSize(row.article, sz),
+              className: "skl-btn",
+              style: {
+                background: doubled ? 'var(--accent)' : 'var(--card)',
+                color: doubled ? '#241D0E' : 'var(--ink)',
+                border: '1px solid ' + (doubled ? 'var(--accent)' : 'var(--line)'),
+                fontFamily: "'JetBrains Mono', monospace"
+              }
+            }, sz, " ×", doubled ? 2 : 1);
+          })), /*#__PURE__*/React.createElement("div", {
+            style: { fontSize: 12.5, color: gridSum(row.article) === BOX_SIZE ? 'var(--positive)' : 'var(--warn)' }
+          }, "Сумма: ", gridSum(row.article), " / ", BOX_SIZE, gridSum(row.article) === BOX_SIZE ? " ✓ — используется для поставки WB" : " — задвой размеры, чтобы вышло 8"))), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: 'var(--ink-soft)',
