@@ -51,7 +51,12 @@ export default {
           const code = String(c.vendorCode || '').trim();
           if (!code) continue;
           if (!articles[code]) {
-            articles[code] = { name: c.title || c.subjectName || '', brand: c.brand || '', sizes: {} };
+            articles[code] = {
+              name: c.title || '',
+              brand: c.brand || '',
+              category: c.subjectName || '',
+              sizes: {},
+            };
           }
           for (const s of (c.sizes || [])) {
             const size = String(s.techSize || s.wbSize || '').trim();

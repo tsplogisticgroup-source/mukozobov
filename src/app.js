@@ -720,6 +720,7 @@ function SkladLedger() {
   const [tzRequests, setTzRequests] = useState([]);
   const [expandedTz, setExpandedTz] = useState(null);
   const [mainSearch, setMainSearch] = useState('');
+  const [mainCategory, setMainCategory] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [photoItems, setPhotoItems] = useState([{
@@ -1785,7 +1786,7 @@ function SkladLedger() {
       for (const [vendorCode, v] of Object.entries(wbArticles)) {
         const code = String(vendorCode).trim().split(/\s+/)[0];
         if (!code) continue;
-        if (!cat[code]) cat[code] = { name: (v && v.name) || '', color: '', brand: (v && v.brand) || '', sizes: {} };
+        if (!cat[code]) cat[code] = { name: (v && v.name) || '', color: '', brand: (v && v.brand) || '', category: (v && v.category) || '', sizes: {} };
         for (const [size, bc] of Object.entries((v && v.sizes) || {})) {
           if (bc && !cat[code].sizes[size]) cat[code].sizes[size] = String(bc);
         }
@@ -2306,6 +2307,7 @@ function SkladLedger() {
   }
   // --- Размерная сетка по артикулу (какие размеры задвоены ×2) ---
   function articleCode(a) { return String(a || '').trim().split(/\s+/)[0]; }
+  function articleCategory(a) { const c = catalog[articleCode(a)]; return (c && c.category) || ''; }
   function articleAllSizes(a) {
     // размеры артикула: из каталога WB (по коду) или из остатка
     const cat = catalog[articleCode(a)];
@@ -4930,7 +4932,20 @@ function SkladLedger() {
     onClick: autofillGrids
   }, "Заполнить размерные сетки из приходов"), /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 12, color: 'var(--ink-soft)' }
-  }, "посчитает задвоенные размеры по данным приходов — потом можно поправить")), loading ? /*#__PURE__*/React.createElement("div", {
+  }, "посчитает задвоенные размеры по данным приходов — потом можно поправить")), (() => {
+    const cats = [...new Set(summary.map(s => articleCategory(s.article)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    if (cats.length < 2) return null;
+    return /*#__PURE__*/React.createElement("div", {
+      style: { display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setMainCategory(''),
+      className: "skl-btn " + (mainCategory === '' ? "skl-btn-primary" : "skl-btn-ghost")
+    }, "Все"), ...cats.map(cat => /*#__PURE__*/React.createElement("button", {
+      key: cat,
+      onClick: () => setMainCategory(mainCategory === cat ? '' : cat),
+      className: "skl-btn " + (mainCategory === cat ? "skl-btn-primary" : "skl-btn-ghost")
+    }, cat)));
+  })(), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 24,
       textAlign: 'center',
@@ -4944,7 +4959,9 @@ function SkladLedger() {
     }
   }, "Пока пусто. Добавь первый приход, чтобы начать учёт.") : (() => {
     const q = mainSearch.trim().toLowerCase();
-    const filteredSummary = q ? summary.filter(row => row.article.toLowerCase().includes(q) || (names[row.article] || '').toLowerCase().includes(q)) : summary;
+    const filteredSummary = summary.filter(row =>
+      (!q || row.article.toLowerCase().includes(q) || (names[row.article] || '').toLowerCase().includes(q) || articleCategory(row.article).toLowerCase().includes(q)) &&
+      (!mainCategory || articleCategory(row.article) === mainCategory));
     return filteredSummary.length === 0 ? /*#__PURE__*/React.createElement("div", {
       style: {
         padding: 24,
@@ -5004,13 +5021,13 @@ function SkladLedger() {
         size: 14
       }) : /*#__PURE__*/React.createElement(ChevronRight, {
         size: 14
-      }), row.article), names[row.article] && /*#__PURE__*/React.createElement("div", {
+      }), row.article), (articleCategory(row.article) || names[row.article]) && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: 'var(--ink-soft)',
           marginLeft: 20
         }
-      }, names[row.article])), /*#__PURE__*/React.createElement("td", {
+      }, articleCategory(row.article) ? /*#__PURE__*/React.createElement("span", { style: { color: 'var(--accent)', fontWeight: 600 } }, articleCategory(row.article)) : '', articleCategory(row.article) && names[row.article] ? ' · ' : '', names[row.article] || '')), /*#__PURE__*/React.createElement("td", {
         className: "skl-mono",
         style: {
           padding: '10px 18px',
