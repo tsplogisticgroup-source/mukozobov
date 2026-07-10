@@ -760,8 +760,10 @@ function SkladLedger() {
   const [recvCargoPhotos, setRecvCargoPhotos] = useState([]);
   const [recvSaving, setRecvSaving] = useState(false);
   const [recvProgress, setRecvProgress] = useState('');
-  const [recvIncome, setRecvIncome] = useState(null); // { fileName, entries:[{article,size,qty}] }
-  const [recvIncomeErr, setRecvIncomeErr] = useState('');
+  const [recvItems, setRecvItems] = useState([]); // [{ id, article, boxes }]
+  function addRecvItem() { setRecvItems(prev => [...prev, { id: uid(), article: '', boxes: '' }]); }
+  function updateRecvItem(id, field, value) { setRecvItems(prev => prev.map(it => it.id === id ? _objectSpread(_objectSpread({}, it), {}, { [field]: value }) : it)); }
+  function removeRecvItem(id) { setRecvItems(prev => prev.filter(it => it.id !== id)); }
   const [labelBoxes, setLabelBoxes] = useState({});
   const [labelError, setLabelError] = useState('');
   const [generatingLabels, setGeneratingLabels] = useState(false);
@@ -1275,48 +1277,15 @@ function SkladLedger() {
       img.src = URL.createObjectURL(file);
     });
   }
-  // Разбор файла прихода (те же колонки, что в «Операции»: артикул/размер/количество).
-  function parseIncomeRows(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = evt => {
-        try {
-          const wb = XLSX.read(new Uint8Array(evt.target.result), { type: 'array', cellDates: true });
-          const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
-          const headers = (json[0] || []).map(h => String(h));
-          const rows = json.slice(1).filter(r => r.some(c => c !== ''));
-          const map = {};
-          FIELD_DEFS['income'].forEach(f => { map[f.key] = guessHeader(headers, f.candidates); });
-          const iArt = map.article ? headers.indexOf(map.article) : -1;
-          const iSize = map.size ? headers.indexOf(map.size) : -1;
-          const iQty = map.qty ? headers.indexOf(map.qty) : -1;
-          if (iArt < 0 || iQty < 0) { reject(new Error('Не найдены колонки «Артикул» и «Количество».')); return; }
-          const entries = rows.map(r => ({
-            article: String(r[iArt]).trim(),
-            size: iSize >= 0 && r[iSize] !== '' ? String(r[iSize]).trim() : NO_SIZE,
-            qty: Number(r[iQty]) || 0
-          })).filter(e => e.article && e.qty);
-          resolve(entries);
-        } catch (err) { reject(err); }
-      };
-      reader.onerror = reject;
-      reader.readAsArrayBuffer(file);
-    });
-  }
-  async function handleRecvIncomeFile(file) {
-    if (!file) return;
-    setRecvIncomeErr('');
-    try {
-      const entries = await parseIncomeRows(file);
-      if (!entries.length) { setRecvIncomeErr('В файле не найдено позиций прихода.'); setRecvIncome(null); return; }
-      setRecvIncome({ fileName: file.name, entries });
-    } catch (e) {
-      setRecvIncomeErr(e.message || 'Не удалось прочитать файл прихода.');
-      setRecvIncome(null);
-    }
-  }
   async function submitReceiving() {
     if (!recvTruck.trim()) { alert('Укажите номер машины.'); return; }
+    const validItems = recvItems.filter(it => it.article && Number(it.boxes) > 0);
+    for (const it of validItems) {
+      if (!gridVector(it.article)) {
+        alert(`Задай размерную сетку (сумма 8) для артикула «${it.article}» — он приходит впервые.`);
+        return;
+      }
+    }
     setRecvSaving(true);
     setRecvProgress('');
     try {
@@ -1337,20 +1306,24 @@ function SkladLedger() {
         const { data } = window.supabase.storage.from(RECEIVING_BUCKET).getPublicUrl(path);
         photos.push({ url: data.publicUrl, path, kind: all[i].kind });
       }
-      // Приход товара, пришедшего этой машиной (создаёт остаток на складе).
+      // Приход = короба × размерная сетка (по каждому размеру). Создаёт остаток.
       let incomeIds = [], incomeQty = 0, items = [];
-      if (recvIncome && recvIncome.entries.length) {
-        const newIncomes = recvIncome.entries.map(e => ({
-          id: uid(), article: e.article, size: e.size, qty: e.qty,
-          date: recvDate, addedAt: new Date().toISOString(),
-          note: `Приёмка машины ${recvTruck.trim()}`, recvId: id, fileName: recvIncome.fileName
-        }));
+      if (validItems.length) {
+        const newIncomes = [];
+        for (const it of validItems) {
+          const gv = gridVector(it.article);
+          const boxes = Number(it.boxes) || 0;
+          for (const [size, count] of Object.entries(gv)) {
+            newIncomes.push({
+              id: uid(), article: it.article, size: String(size), qty: count * boxes,
+              date: recvDate, addedAt: new Date().toISOString(),
+              note: `Приёмка машины ${recvTruck.trim()}`, recvId: id
+            });
+          }
+        }
         incomeIds = newIncomes.map(x => x.id);
         incomeQty = newIncomes.reduce((s, x) => s + x.qty, 0);
-        // Разбивка по артикулам: сколько пар и коробов (пары / 8) приехало
-        const byArticle = {};
-        recvIncome.entries.forEach(e => { byArticle[e.article] = (byArticle[e.article] || 0) + e.qty; });
-        items = Object.entries(byArticle).map(([article, qty]) => ({ article, qty, boxes: qty / BOX_SIZE })).sort((a, b) => b.qty - a.qty);
+        items = validItems.map(it => ({ article: it.article, boxes: Number(it.boxes) || 0, qty: (Number(it.boxes) || 0) * BOX_SIZE })).sort((a, b) => b.qty - a.qty);
         await persist(KEY_INCOMES, [...incomes, ...newIncomes], setIncomes);
       }
       const record = {
@@ -1363,7 +1336,7 @@ function SkladLedger() {
       logAction(`Приёмка машины ${record.truck}${record.boxes ? ` · ${record.boxes}` : ''}${incomeQty ? ` · приход ${incomeQty} шт.` : ''}${photos.length ? ` · фото ${photos.length}` : ''}`, incomeIds.length ? { incomes: incomeIds } : {});
       setRecvTruck(''); setRecvCarrier(''); setRecvBoxes(''); setRecvNote('');
       setRecvTruckPhotos([]); setRecvCargoPhotos([]); setRecvProgress('');
-      setRecvIncome(null); setRecvIncomeErr('');
+      setRecvItems([]);
       alert('Приёмка сохранена.' + (incomeQty ? ` Приход: ${incomeQty} шт.` : ''));
     } catch (e) {
       console.error(e);
@@ -2637,16 +2610,49 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 16 } },
         recvPhotoField('Фото машины', recvTruckPhotos, setRecvTruckPhotos),
         recvPhotoField('Фото загрузки в фуре', recvCargoPhotos, setRecvCargoPhotos)),
-      recvField('Товар, пришедший этой машиной (создаёт приход/остаток) — необязательно',
+      recvField('Товар, пришедший этой машиной — выбери артикулы и укажи короба (1 короб = 8 пар)',
         /*#__PURE__*/React.createElement("div", null,
-          /*#__PURE__*/React.createElement("label", { className: "skl-btn skl-btn-ghost", style: { cursor: 'pointer' } },
-            /*#__PURE__*/React.createElement(FileSpreadsheet, { size: 14 }),
-            recvIncome
-              ? ` ✓ ${recvIncome.fileName} — ${recvIncome.entries.length} позиций, ${recvIncome.entries.reduce((s, e) => s + e.qty, 0)} шт.`
-              : ' Загрузить файл прихода (артикул, размер, количество)',
-            /*#__PURE__*/React.createElement("input", { type: "file", accept: ".xlsx,.xls,.csv", style: { display: 'none' }, onChange: e => handleRecvIncomeFile(e.target.files[0]) })),
-          recvIncome && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { marginLeft: 8, color: 'var(--negative)' }, onClick: () => { setRecvIncome(null); setRecvIncomeErr(''); } }, "Убрать"),
-          recvIncomeErr && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginTop: 6 } }, recvIncomeErr)),
+          /*#__PURE__*/React.createElement("datalist", { id: "recv-catalog-codes" },
+            Object.keys(catalog).sort().map(code => /*#__PURE__*/React.createElement("option", { key: code, value: code },
+              catalog[code].category ? `${catalog[code].category}` : ''))),
+          recvItems.length === 0
+            ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 12.5, marginBottom: 10 } }, "Позиции не добавлены — необязательно, но так создаётся остаток на складе.")
+            : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 10 } },
+                recvItems.map(it => {
+                  const cat = it.article ? articleCategory(it.article) : '';
+                  const hasGrid = it.article ? !!gridVector(it.article) : false;
+                  const sizes = it.article ? articleAllSizes(it.article) : [];
+                  const boxes = Number(it.boxes) || 0;
+                  return /*#__PURE__*/React.createElement("div", { key: it.id, className: "skl-card", style: { padding: 12 } },
+                    /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' } },
+                      /*#__PURE__*/React.createElement("div", { style: { flex: '1 1 200px', minWidth: 160 } },
+                        /*#__PURE__*/React.createElement("input", { className: "skl-input", list: "recv-catalog-codes", value: it.article, placeholder: "Артикул (напр. 283-7)", onChange: e => updateRecvItem(it.id, 'article', e.target.value) }),
+                        cat && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 4 } }, cat)),
+                      /*#__PURE__*/React.createElement("div", { style: { flex: '0 0 110px' } },
+                        /*#__PURE__*/React.createElement("input", { className: "skl-input", type: "number", min: "0", value: it.boxes, placeholder: "Короба", onChange: e => updateRecvItem(it.id, 'boxes', e.target.value) }),
+                        boxes > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 4 } }, boxes * BOX_SIZE, " пар")),
+                      /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)', flex: 'none' }, onClick: () => removeRecvItem(it.id) },
+                        /*#__PURE__*/React.createElement(Trash2, { size: 12 }))),
+                    it.article && !hasGrid && /*#__PURE__*/React.createElement("div", { style: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' } },
+                      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--warn)', marginBottom: 8 } }, "⚠ Новый артикул — задай размерную сетку (короб = 8 пар · отметь задвоенные ×2)"),
+                      sizes.length === 0
+                        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)' } }, "Нет размеров в каталоге WB для этого артикула — синхронизируй каталог или проверь код.")
+                        : /*#__PURE__*/React.createElement("div", null,
+                            /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                              sizes.map(sz => {
+                                const doubled = gridDoubled(it.article).includes(String(sz));
+                                return /*#__PURE__*/React.createElement("button", {
+                                  key: sz, className: "skl-btn skl-btn-ghost",
+                                  style: { padding: '6px 12px', borderColor: doubled ? 'var(--accent)' : 'var(--line)', color: doubled ? 'var(--accent)' : 'var(--ink)', fontWeight: doubled ? 700 : 500 },
+                                  onClick: () => toggleGridSize(it.article, sz)
+                                }, sz, doubled ? ' ×2' : ' ×1');
+                              })),
+                            /*#__PURE__*/React.createElement("div", {
+                              style: { fontSize: 12.5, marginTop: 8, color: gridSum(it.article) === BOX_SIZE ? 'var(--positive)' : 'var(--warn)' }
+                            }, "Сумма: ", gridSum(it.article), " / ", BOX_SIZE, gridSum(it.article) === BOX_SIZE ? " ✓" : " — задвой размеры, чтобы вышло 8"))));
+                })),
+          /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: addRecvItem },
+            /*#__PURE__*/React.createElement(Plus, { size: 14 }), " Добавить артикул")),
         { marginBottom: 16 }),
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: recvSaving, onClick: submitReceiving }, recvSaving ? "Сохраняю…" : "Сохранить приёмку"),
