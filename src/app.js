@@ -1741,9 +1741,10 @@ function SkladLedger() {
       setGeneratingLabels(false);
     }
   }
-  async function syncBarcodes() {
+  async function syncBarcodes(opts) {
+    const silent = opts && opts.silent;
     if (WB_PROXY_URL.includes('YOUR-WORKER')) {
-      setSyncError('Адрес сервиса синхронизации (WB_PROXY_URL) пока не настроен в коде сайта.');
+      if (!silent) setSyncError('Адрес сервиса синхронизации (WB_PROXY_URL) пока не настроен в коде сайта.');
       return;
     }
     setSyncingBarcodes(true);
@@ -1770,11 +1771,37 @@ function SkladLedger() {
       logAction(`Синхронизация с WB: ${Object.keys(cat).length} артикулов`, {});
     } catch (e) {
       console.error(e);
-      setSyncError('Не удалось получить данные от WB: ' + (e.message || e));
+      if (!silent) setSyncError('Не удалось получить данные от WB: ' + (e.message || e));
     } finally {
       setSyncingBarcodes(false);
     }
   }
+  // Момент последнего наступившего 9:00 по Москве (UTC+3, без перехода на летнее время).
+  function lastMoscow9amMs() {
+    const now = Date.now();
+    const msk = new Date(now + 3 * 3600 * 1000); // «московские» часы в полях UTC
+    let boundary = Date.UTC(msk.getUTCFullYear(), msk.getUTCMonth(), msk.getUTCDate(), 9, 0, 0) - 3 * 3600 * 1000;
+    if (boundary > now) boundary -= 24 * 3600 * 1000; // сегодняшние 9:00 ещё не наступили → берём вчерашние
+    return boundary;
+  }
+  // Авто-синхронизация с WB раз в сутки в 9:00 МСК: при открытии приложения и раз в 30 мин,
+  // пока вкладка открыта, — если после ближайших 9:00 МСК синка ещё не было, запускаем тихо.
+  const autoSyncRef = useRef(false);
+  useEffect(() => {
+    if (loading) return; // ждём, пока подтянутся данные из Supabase (в т.ч. время последнего синка)
+    function maybeSync() {
+      if (autoSyncRef.current) return;
+      if (syncingBarcodes) return;
+      const last = barcodesSyncedAt ? Date.parse(barcodesSyncedAt) : 0;
+      if (!last || last < lastMoscow9amMs()) {
+        autoSyncRef.current = true;
+        syncBarcodes({ silent: true }).finally(() => { autoSyncRef.current = false; });
+      }
+    }
+    maybeSync();
+    const id = setInterval(maybeSync, 30 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [loading, barcodesSyncedAt, syncingBarcodes]);
   function toggleLabelSelection(article, size) {
     const key = `${article}__${size}`;
     setLabelSelections(prev => {
@@ -4213,10 +4240,12 @@ function SkladLedger() {
   }, /*#__PURE__*/React.createElement("button", {
     className: "skl-btn skl-btn-primary",
     disabled: syncingBarcodes,
-    onClick: syncBarcodes
+    onClick: () => syncBarcodes()
   }, /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), syncingBarcodes ? " Синхронизирую…" : " Синхронизировать с WB"), barcodesSyncedAt && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 12, color: 'var(--ink-soft)' }
-  }, "обновлено с WB: ", fmtDate(String(barcodesSyncedAt).slice(0, 10))), syncError && /*#__PURE__*/React.createElement("span", {
+  }, "обновлено с WB: ", fmtDate(String(barcodesSyncedAt).slice(0, 10))), /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 12, color: 'var(--ink-soft)' }
+  }, "· авто каждый день в 9:00 МСК"), syncError && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 12, color: 'var(--negative)' }
   }, syncError)), labelError && /*#__PURE__*/React.createElement("div", {
     style: {
