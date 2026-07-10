@@ -5021,13 +5021,14 @@ function SkladLedger() {
         size: 14
       }) : /*#__PURE__*/React.createElement(ChevronRight, {
         size: 14
-      }), row.article), (articleCategory(row.article) || names[row.article]) && /*#__PURE__*/React.createElement("div", {
+      }), row.article), articleCategory(row.article) && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
-          color: 'var(--ink-soft)',
+          color: 'var(--accent)',
+          fontWeight: 600,
           marginLeft: 20
         }
-      }, articleCategory(row.article) ? /*#__PURE__*/React.createElement("span", { style: { color: 'var(--accent)', fontWeight: 600 } }, articleCategory(row.article)) : '', articleCategory(row.article) && names[row.article] ? ' · ' : '', names[row.article] || '')), /*#__PURE__*/React.createElement("td", {
+      }, articleCategory(row.article))), /*#__PURE__*/React.createElement("td", {
         className: "skl-mono",
         style: {
           padding: '10px 18px',
