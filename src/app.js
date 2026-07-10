@@ -779,6 +779,7 @@ function SkladLedger() {
   const [printMode, setPrintMode] = useState(false);
   const [uploadPreview, setUploadPreview] = useState(null);
   const [aktPreview, setAktPreview] = useState(null);
+  const [aktTzId, setAktTzId] = useState(null); // ТЗ, из которого загружают акт (стадия «отгружено»)
   const [expanded, setExpanded] = useState(null);
   const [searchShipment, setSearchShipment] = useState('');
   const [role, setRole] = useState(() => {
@@ -2130,6 +2131,8 @@ function SkladLedger() {
     };
     if (defEntries.length) refs.defects = defEntries.map(e => e.id);
     if (unidEntry) refs.unidentified = [unidEntry.id];
+    // Если акт загружали из ТЗ — переводим его в «Отгружено» (списан с «принимается WB»).
+    if (aktTzId) { updateTzStatus(aktTzId, 'done'); setAktTzId(null); }
     setAktPreview(null);
     logAction(label, refs);
   }
@@ -2210,6 +2213,8 @@ function SkladLedger() {
         shipped: 0,
         defect: 0,
         photo: 0,
+        inWork: 0,
+        toWb: 0,
         sizes: {}
       };
       return articleMap[article];
@@ -2245,8 +2250,21 @@ function SkladLedger() {
       a.photo += p.qty;
       ensureSize(a, p.size).photo += p.qty;
     });
+    // Резерв под ТЗ: 'in_progress' = «в работе», 'shipping' = «принимается складом WB».
+    // Оба выводятся из доступного остатка (товар ещё не отгружён актом, но уже расписан).
+    tzRequests.forEach(t => {
+      const bucket = t.status === 'in_progress' ? 'inWork' : (t.status === 'shipping' ? 'toWb' : null);
+      if (!bucket) return;
+      (t.rows || []).forEach(row => {
+        const qty = Number(row.qty) || 0;
+        if (qty <= 0) return;
+        ensure(canonArticle(row.article))[bucket] += qty;
+      });
+    });
     return Object.values(articleMap).map(a => _objectSpread(_objectSpread({}, a), {}, {
-      balance: a.income - a.shipped - a.defect - a.photo,
+      // Физический остаток (что лежит на складе) и доступный (за вычетом резерва под ТЗ).
+      physical: a.income - a.shipped - a.defect - a.photo,
+      balance: a.income - a.shipped - a.defect - a.photo - a.inWork - a.toWb,
       sizes: Object.values(a.sizes).map(sz => _objectSpread(_objectSpread({}, sz), {}, {
         balance: sz.income - sz.shipped - sz.defect - sz.photo
       })).sort((x, y) => x.size.localeCompare(y.size, undefined, {
@@ -2255,7 +2273,7 @@ function SkladLedger() {
     })).sort((a, b) => a.article.localeCompare(b.article, undefined, {
       numeric: true
     }));
-  }, [incomes, shipments, defects, photo]);
+  }, [incomes, shipments, defects, photo, tzRequests]);
   // Данные для этикеток: содержимое (имя, штрихкод, цвет, размеры) — из каталога,
   // количество по размерам — из остатка склада. Так раздел «Этикетки» и кнопка
   // «Скачать для работы» берут всё из одного сохранённого каталога.
@@ -3277,55 +3295,7 @@ function SkladLedger() {
       justifyContent: 'center',
       padding: '0 4px'
     }
-  }, tzRequests.filter(r => r.status === 'new').length)))), activeTab === 'ops' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
-    title: "Загрузка из Excel",
-    icon: /*#__PURE__*/React.createElement(FileSpreadsheet, {
-      size: 18
-    }),
-    open: openSections.upload,
-    onToggle: () => toggleSection('upload')
-  }, /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 13,
-      color: 'var(--ink-soft)',
-      marginTop: 0,
-      marginBottom: 12
-    }
-  }, "Приход: артикул, размер, количество. Отгрузка: «Акт приёмки товара» WB — номер поставки, дата и брак по неполным коробам определятся автоматически."), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: 'flex',
-      gap: 8,
-      flexWrap: 'wrap'
-    }
-  }, /*#__PURE__*/React.createElement("label", {
-    className: "skl-btn skl-btn-ghost",
-    style: {
-      cursor: 'pointer'
-    }
-  }, /*#__PURE__*/React.createElement(Box, {
-    size: 14
-  }), " Файл прихода", /*#__PURE__*/React.createElement("input", {
-    type: "file",
-    accept: ".xlsx,.xls,.csv",
-    onChange: e => handleFile(e, 'income'),
-    style: {
-      display: 'none'
-    }
-  })), /*#__PURE__*/React.createElement("label", {
-    className: "skl-btn skl-btn-ghost",
-    style: {
-      cursor: 'pointer'
-    }
-  }, /*#__PURE__*/React.createElement(Upload, {
-    size: 14
-  }), " Файл отгрузки", /*#__PURE__*/React.createElement("input", {
-    type: "file",
-    accept: ".xlsx,.xls,.csv",
-    onChange: e => handleFile(e, 'shipment'),
-    style: {
-      display: 'none'
-    }
-  })))), /*#__PURE__*/React.createElement(Section, {
+  }, tzRequests.filter(r => r.status === 'new').length)))), (activeTab === 'ops' || aktPreview) && /*#__PURE__*/React.createElement(React.Fragment, null, activeTab === 'ops' && /*#__PURE__*/React.createElement(Section, {
     title: "Списать для фотостудии",
     icon: /*#__PURE__*/React.createElement(Camera, {
       size: 18
@@ -3716,7 +3686,7 @@ function SkladLedger() {
     onClick: confirmAkt
   }, "Записать отгрузку и брак"), /*#__PURE__*/React.createElement("button", {
     className: "skl-btn skl-btn-ghost",
-    onClick: () => setAktPreview(null)
+    onClick: () => { setAktPreview(null); setAktTzId(null); }
   }, "Отмена"))), uploadPreview && /*#__PURE__*/React.createElement("div", {
     className: "skl-card",
     style: {
@@ -4038,6 +4008,10 @@ function SkladLedger() {
         label: 'В работе',
         color: 'var(--accent)'
       },
+      shipping: {
+        label: 'Принимается складом WB',
+        color: 'var(--accent)'
+      },
       done: {
         label: 'Отгружено',
         color: 'var(--positive)'
@@ -4175,15 +4149,31 @@ function SkladLedger() {
     }, /*#__PURE__*/React.createElement(FileSpreadsheet, {
       size: 12
     }), " Excel"), r.status === 'new' && /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-primary",
+      onClick: () => updateTzStatus(r.id, 'in_progress')
+    }, "Принять в работу"), r.status === 'in_progress' && /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-primary",
+      onClick: () => updateTzStatus(r.id, 'shipping')
+    }, "Отгружено (принимается WB)"), r.status === 'in_progress' && /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-ghost",
+      onClick: () => updateTzStatus(r.id, 'new')
+    }, "Вернуть"), r.status === 'shipping' && /*#__PURE__*/React.createElement("label", {
+      className: "skl-btn skl-btn-primary",
+      style: { cursor: 'pointer' }
+    }, /*#__PURE__*/React.createElement(Upload, {
+      size: 12
+    }), " Загрузить акт WB (отгрузить)", /*#__PURE__*/React.createElement("input", {
+      type: "file",
+      accept: ".xlsx,.xls,.csv",
+      style: { display: 'none' },
+      onChange: e => { setAktTzId(r.id); handleFile(e, 'shipment'); }
+    })), r.status === 'shipping' && /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
       onClick: () => updateTzStatus(r.id, 'in_progress')
-    }, "В работу"), r.status === 'in_progress' && /*#__PURE__*/React.createElement("button", {
+    }, "Вернуть в работу"), r.status === 'done' && /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
-      onClick: () => updateTzStatus(r.id, 'done')
-    }, "Отметить отгруженным"), r.status === 'done' && /*#__PURE__*/React.createElement("button", {
-      className: "skl-btn skl-btn-ghost",
-      onClick: () => updateTzStatus(r.id, 'in_progress')
-    }, "Вернуть в работу"), /*#__PURE__*/React.createElement("button", {
+      onClick: () => updateTzStatus(r.id, 'shipping')
+    }, "Вернуть в «принимается WB»"), /*#__PURE__*/React.createElement("button", {
       className: "skl-btn skl-btn-ghost",
       style: {
         color: 'var(--negative)'
@@ -5118,7 +5108,9 @@ function SkladLedger() {
           fontWeight: 400,
           color: 'var(--ink-soft)'
         }
-      }, " + ", remPairs, " пар")), /*#__PURE__*/React.createElement("td", {
+      }, " + ", remPairs, " пар"), (row.inWork > 0 || row.toWb > 0) && /*#__PURE__*/React.createElement("div", {
+        style: { fontWeight: 400, fontSize: 11, color: 'var(--ink-soft)', marginTop: 3 }
+      }, row.inWork > 0 ? `в работе: ${row.inWork}` : '', row.inWork > 0 && row.toWb > 0 ? ' · ' : '', row.toWb > 0 ? `принимается WB: ${row.toWb}` : '')), /*#__PURE__*/React.createElement("td", {
         style: {
           padding: '10px 18px'
         }
