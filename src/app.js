@@ -2300,29 +2300,74 @@ function SkladLedger() {
     return s ? s.sizes.map(z => String(z.size)).filter(z => z !== NO_SIZE)
       .sort((x, y) => (Number(x) || 0) - (Number(y) || 0)) : [];
   }
-  function gridDoubled(a) { return grids[articleCode(a)] || []; }
-  function toggleGridSize(a, size) {
+  // Раскладка короба: code -> {size: 0|1|2} (нет / ×1 / ×2). Старый формат
+  // (массив задвоенных размеров) читаем как совместимость: перечисленные = ×2.
+  function gridCounts(a) {
+    const raw = grids[articleCode(a)];
+    const sizes = articleAllSizes(a);
+    const counts = {};
+    if (Array.isArray(raw)) {
+      sizes.forEach(sz => { counts[String(sz)] = raw.includes(String(sz)) ? 2 : 1; });
+    } else if (raw && typeof raw === 'object') {
+      sizes.forEach(sz => { counts[String(sz)] = (String(sz) in raw) ? raw[String(sz)] : 1; });
+    } else {
+      sizes.forEach(sz => { counts[String(sz)] = 1; });
+    }
+    return counts;
+  }
+  function gridDefined(a) { return articleCode(a) in grids; }
+  // Клик по размеру циклит ×1 → ×2 → нет → ×1. Сохраняем полную карту счётчиков.
+  function cycleGridSize(a, size) {
     const code = articleCode(a);
-    const cur = grids[code] || [];
+    const counts = gridCounts(a);
     const sz = String(size);
-    const next = cur.includes(sz) ? cur.filter(s => s !== sz) : [...cur, sz];
-    persist(KEY_GRIDS, _objectSpread(_objectSpread({}, grids), {}, { [code]: next }), setGrids);
+    const cur = (sz in counts) ? counts[sz] : 1;
+    counts[sz] = cur === 1 ? 2 : (cur === 2 ? 0 : 1);
+    persist(KEY_GRIDS, _objectSpread(_objectSpread({}, grids), {}, { [code]: counts }), setGrids);
   }
   function gridSum(a) {
-    const doubled = gridDoubled(a);
-    return articleAllSizes(a).reduce((s, sz) => s + (doubled.includes(String(sz)) ? 2 : 1), 0);
+    return Object.values(gridCounts(a)).reduce((s, c) => s + c, 0);
   }
-  // Вектор пар на короб по сетке ({size: count}) или null, если сетка не задана/не равна 8.
+  // Вектор пар на короб ({size: count>0}) или null, если сетка не задана / сумма ≠ 8.
   function gridVector(a) {
-    const code = articleCode(a);
-    if (!(code in grids)) return null;
-    const doubled = grids[code] || [];
-    const sizes = articleAllSizes(a);
-    if (!sizes.length) return null;
+    if (!gridDefined(a)) return null;
+    const counts = gridCounts(a);
+    if (!Object.keys(counts).length) return null;
     const vec = {};
     let sum = 0;
-    sizes.forEach(sz => { const c = doubled.includes(String(sz)) ? 2 : 1; vec[String(sz)] = c; sum += c; });
+    Object.entries(counts).forEach(([sz, c]) => { if (c > 0) vec[sz] = c; sum += c; });
     return sum === BOX_SIZE ? vec : null;
+  }
+  // Редактор размерной сетки: кнопки размеров (клик циклит нет → ×1 → ×2) + сумма/8.
+  function sizeGridEditor(article) {
+    const sizes = articleAllSizes(article);
+    if (!sizes.length) {
+      return /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
+        "Нет размеров в каталоге WB для этого артикула — синхронизируй каталог или проверь код.");
+    }
+    const counts = gridCounts(article);
+    const sum = gridSum(article);
+    return /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+        sizes.map(sz => {
+          const c = counts[String(sz)];
+          const isAbs = c === 0, isDbl = c === 2;
+          return /*#__PURE__*/React.createElement("button", {
+            key: sz, className: "skl-btn skl-btn-ghost",
+            style: {
+              padding: '6px 12px',
+              borderColor: isDbl ? 'var(--accent)' : (isAbs ? 'var(--line)' : 'var(--line)'),
+              color: isAbs ? 'var(--ink-soft)' : (isDbl ? 'var(--accent)' : 'var(--ink)'),
+              fontWeight: isDbl ? 700 : 500,
+              opacity: isAbs ? 0.5 : 1,
+              textDecoration: isAbs ? 'line-through' : 'none'
+            },
+            onClick: () => cycleGridSize(article, sz)
+          }, sz, isAbs ? ' · нет' : (isDbl ? ' ×2' : ' ×1'));
+        })),
+      /*#__PURE__*/React.createElement("div", {
+        style: { fontSize: 12.5, marginTop: 8, color: sum === BOX_SIZE ? 'var(--positive)' : 'var(--warn)' }
+      }, "Сумма: ", sum, " / ", BOX_SIZE, sum === BOX_SIZE ? " ✓" : " — клик по размеру: нет / ×1 / ×2, чтобы вышло 8"));
   }
   // Авто-заполнение сеток из приходов: размерный ряд = распределение прихода по размерам
   // на короб (8). Размеры, которым достаётся ×2, помечаем задвоенными.
@@ -2342,7 +2387,11 @@ function SkladLedger() {
       const order = raw.map((x, i) => ({ i, f: x - Math.floor(x) })).sort((a, b) => b.f - a.f);
       let g = 0;
       while (res.reduce((a, b) => a + b, 0) < BOX_SIZE && g < 50) { res[order[g % order.length].i]++; g++; }
-      next[code] = sizes.filter((z, i) => res[i] >= 2).map(z => String(z.size));
+      // Полная карта счётчиков: размеры без прихода = 0 (нет в коробе).
+      const counts = {};
+      articleAllSizes(s.article).forEach(sz => { counts[String(sz)] = 0; });
+      sizes.forEach((z, i) => { counts[String(z.size)] = res[i]; });
+      next[code] = counts;
       filled++;
     });
     persist(KEY_GRIDS, next, setGrids);
@@ -2621,7 +2670,6 @@ function SkladLedger() {
                 recvItems.map(it => {
                   const cat = it.article ? articleCategory(it.article) : '';
                   const hasGrid = it.article ? !!gridVector(it.article) : false;
-                  const sizes = it.article ? articleAllSizes(it.article) : [];
                   const boxes = Number(it.boxes) || 0;
                   return /*#__PURE__*/React.createElement("div", { key: it.id, className: "skl-card", style: { padding: 12 } },
                     /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' } },
@@ -2633,23 +2681,10 @@ function SkladLedger() {
                         boxes > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, color: 'var(--ink-soft)', marginTop: 4 } }, boxes * BOX_SIZE, " пар")),
                       /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)', flex: 'none' }, onClick: () => removeRecvItem(it.id) },
                         /*#__PURE__*/React.createElement(Trash2, { size: 12 }))),
-                    it.article && !hasGrid && /*#__PURE__*/React.createElement("div", { style: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' } },
-                      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--warn)', marginBottom: 8 } }, "⚠ Новый артикул — задай размерную сетку (короб = 8 пар · отметь задвоенные ×2)"),
-                      sizes.length === 0
-                        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)' } }, "Нет размеров в каталоге WB для этого артикула — синхронизируй каталог или проверь код.")
-                        : /*#__PURE__*/React.createElement("div", null,
-                            /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
-                              sizes.map(sz => {
-                                const doubled = gridDoubled(it.article).includes(String(sz));
-                                return /*#__PURE__*/React.createElement("button", {
-                                  key: sz, className: "skl-btn skl-btn-ghost",
-                                  style: { padding: '6px 12px', borderColor: doubled ? 'var(--accent)' : 'var(--line)', color: doubled ? 'var(--accent)' : 'var(--ink)', fontWeight: doubled ? 700 : 500 },
-                                  onClick: () => toggleGridSize(it.article, sz)
-                                }, sz, doubled ? ' ×2' : ' ×1');
-                              })),
-                            /*#__PURE__*/React.createElement("div", {
-                              style: { fontSize: 12.5, marginTop: 8, color: gridSum(it.article) === BOX_SIZE ? 'var(--positive)' : 'var(--warn)' }
-                            }, "Сумма: ", gridSum(it.article), " / ", BOX_SIZE, gridSum(it.article) === BOX_SIZE ? " ✓" : " — задвой размеры, чтобы вышло 8"))));
+                    it.article && /*#__PURE__*/React.createElement("div", { style: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' } },
+                      /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: hasGrid ? 'var(--ink-soft)' : 'var(--warn)', marginBottom: 8 } },
+                        hasGrid ? "Размерная сетка короба (клик по размеру: нет / ×1 / ×2)" : "⚠ Задай размерную сетку короба: клик по размеру циклит нет / ×1 / ×2 (сумма = 8)"),
+                      sizeGridEditor(it.article)));
                 })),
           /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: addRecvItem },
             /*#__PURE__*/React.createElement(Plus, { size: 14 }), " Добавить артикул")),
@@ -5073,26 +5108,7 @@ function SkladLedger() {
         style: { margin: '14px 0 6px' }
       }, /*#__PURE__*/React.createElement("div", {
         style: { fontSize: 12, color: 'var(--ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }
-      }, "Размерная сетка (короб = 8 пар · отметь задвоенные ×2)"), articleAllSizes(row.article).length === 0
-        ? /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)' } }, "Нет размеров у артикула. Синхронизируй каталог с WB (раздел «Этикетки»).")
-        : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-            style: { display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }
-          }, articleAllSizes(row.article).map(sz => {
-            const doubled = gridDoubled(row.article).includes(String(sz));
-            return /*#__PURE__*/React.createElement("button", {
-              key: sz,
-              onClick: () => toggleGridSize(row.article, sz),
-              className: "skl-btn",
-              style: {
-                background: doubled ? 'var(--accent)' : 'var(--card)',
-                color: doubled ? '#241D0E' : 'var(--ink)',
-                border: '1px solid ' + (doubled ? 'var(--accent)' : 'var(--line)'),
-                fontFamily: "'JetBrains Mono', monospace"
-              }
-            }, sz, " ×", doubled ? 2 : 1);
-          })), /*#__PURE__*/React.createElement("div", {
-            style: { fontSize: 12.5, color: gridSum(row.article) === BOX_SIZE ? 'var(--positive)' : 'var(--warn)' }
-          }, "Сумма: ", gridSum(row.article), " / ", BOX_SIZE, gridSum(row.article) === BOX_SIZE ? " ✓ — используется для поставки WB" : " — задвой размеры, чтобы вышло 8"))), /*#__PURE__*/React.createElement("div", {
+      }, "Размерная сетка короба (клик по размеру: нет / ×1 / ×2 · сумма = 8)"), sizeGridEditor(row.article)), /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: 'var(--ink-soft)',
