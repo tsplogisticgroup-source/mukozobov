@@ -2340,6 +2340,30 @@ function SkladLedger() {
     sizes.forEach(sz => { const c = doubled.includes(String(sz)) ? 2 : 1; vec[String(sz)] = c; sum += c; });
     return sum === BOX_SIZE ? vec : null;
   }
+  // Авто-заполнение сеток из приходов: размерный ряд = распределение прихода по размерам
+  // на короб (8). Размеры, которым достаётся ×2, помечаем задвоенными.
+  function autofillGrids() {
+    const next = _objectSpread({}, grids);
+    let filled = 0;
+    summary.forEach(s => {
+      const code = articleCode(s.article);
+      const sizes = s.sizes
+        .filter(z => String(z.size) !== NO_SIZE && z.income > 0)
+        .sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
+      if (sizes.length < 2) return;
+      const total = sizes.reduce((t, z) => t + z.income, 0);
+      if (total <= 0) return;
+      const raw = sizes.map(z => z.income / total * BOX_SIZE);
+      const res = raw.map(x => Math.floor(x));
+      const order = raw.map((x, i) => ({ i, f: x - Math.floor(x) })).sort((a, b) => b.f - a.f);
+      let g = 0;
+      while (res.reduce((a, b) => a + b, 0) < BOX_SIZE && g < 50) { res[order[g % order.length].i]++; g++; }
+      next[code] = sizes.filter((z, i) => res[i] >= 2).map(z => String(z.size));
+      filled++;
+    });
+    persist(KEY_GRIDS, next, setGrids);
+    alert(`Готово! Сетки заполнены для ${filled} артикулов (из приходов). Проверь в остатках и подправь, где нужно.`);
+  }
   const totals = useMemo(() => ({
     sku: summary.length,
     income: summary.reduce((s, x) => s + x.income, 0),
@@ -4899,7 +4923,14 @@ function SkladLedger() {
     placeholder: "Поиск по артикулу или названию",
     value: mainSearch,
     onChange: e => setMainSearch(e.target.value)
-  }))), loading ? /*#__PURE__*/React.createElement("div", {
+  }))), summary.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "skl-btn skl-btn-primary",
+    onClick: autofillGrids
+  }, "Заполнить размерные сетки из приходов"), /*#__PURE__*/React.createElement("span", {
+    style: { fontSize: 12, color: 'var(--ink-soft)' }
+  }, "посчитает задвоенные размеры по данным приходов — потом можно поправить")), loading ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 24,
       textAlign: 'center',
