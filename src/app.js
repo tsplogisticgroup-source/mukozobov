@@ -2565,6 +2565,22 @@ function SkladLedger() {
     }
     XLSX.writeFile(wb, `ostatki_${todayISO()}.xlsx`);
   }
+  // Экспорт сводки с дашборда (приход, отгружено, брак и т.д.) в Excel.
+  function exportDashboard() {
+    const rows = [
+      { 'Показатель': 'Артикулов', 'Значение': totals.sku },
+      { 'Показатель': 'Приход всего, шт.', 'Значение': totals.income },
+      { 'Показатель': 'Брак всего, шт.', 'Значение': totals.defect },
+      { 'Показатель': 'Фотостудия, шт.', 'Значение': totals.photo },
+      { 'Показатель': 'Обезличка, шт.', 'Значение': totals.unidentified },
+      { 'Показатель': 'Отгружено всего, шт.', 'Значение': totals.shipped },
+      { 'Показатель': 'Остаток на складе, шт.', 'Значение': totals.balance }
+    ];
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Сводка');
+    XLSX.writeFile(wb, `svodka_sklad_${todayISO()}.xlsx`);
+  }
   function historyFor(article) {
     const ins = incomes.filter(i => i.article === article).map(i => _objectSpread(_objectSpread({}, i), {}, {
       type: 'income'
@@ -2624,12 +2640,11 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("rect", { key: 3, x: 14, y: 12, width: 7, height: 9, rx: 1 }),
       /*#__PURE__*/React.createElement("rect", { key: 4, x: 3, y: 16, width: 7, height: 5, rx: 1 }) ]) },
     { key: 'main', label: 'Остатки', icon: /*#__PURE__*/React.createElement(Box, { size: 17 }) },
-    { key: 'ops', label: 'Операции', icon: /*#__PURE__*/React.createElement(Upload, { size: 17 }) },
-    ...(role === 'fulfillment' ? [{ key: 'receiving', label: 'Приёмка машин', icon: svgIcon([
+    { key: 'receiving', label: 'Приёмка машин', icon: svgIcon([
       /*#__PURE__*/React.createElement("path", { key: 1, d: "M14 18V6a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1" }),
       /*#__PURE__*/React.createElement("path", { key: 2, d: "M14 9h4l3 3v5a1 1 0 0 1-1 1h-1" }),
       /*#__PURE__*/React.createElement("circle", { key: 3, cx: 7, cy: 18, r: 2 }),
-      /*#__PURE__*/React.createElement("circle", { key: 4, cx: 17, cy: 18, r: 2 }) ]) }] : []),
+      /*#__PURE__*/React.createElement("circle", { key: 4, cx: 17, cy: 18, r: 2 }) ]) },
     { key: 'tz', label: 'ТЗ на отгрузку', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 17 }) },
     ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }] : []),
     { key: 'reports', label: 'Отчёты', icon: svgIcon([
@@ -2702,7 +2717,7 @@ function SkladLedger() {
         onChange: e => setFiles(Array.from(e.target.files || []))
       })));
   const receivingContent = /*#__PURE__*/React.createElement(React.Fragment, null,
-    /*#__PURE__*/React.createElement(Section, { title: "Новая приёмка машины", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
+    role === 'fulfillment' && /*#__PURE__*/React.createElement(Section, { title: "Новая приёмка машины", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 } },
         recvField('Дата', /*#__PURE__*/React.createElement("input", { type: "date", className: "skl-input", value: recvDate, onChange: e => setRecvDate(e.target.value) })),
         recvField('Номер машины *', /*#__PURE__*/React.createElement("input", { className: "skl-input", value: recvTruck, onChange: e => setRecvTruck(e.target.value), placeholder: "А123ВС 77" })),
@@ -2747,7 +2762,7 @@ function SkladLedger() {
         recvProgress && /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } }, recvProgress))),
     /*#__PURE__*/React.createElement(Section, { title: `Журнал приёмок (${receiving.length})`, icon: /*#__PURE__*/React.createElement(Clock, { size: 18 }), open: true, collapsible: false },
       receiving.length === 0
-        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Пока нет записей. Добавь первую приёмку выше.")
+        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, role === 'fulfillment' ? "Пока нет записей. Добавь первую приёмку выше." : "Пока нет записей о приёмке машин.")
         : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
             receiving.map(rec => /*#__PURE__*/React.createElement("div", { key: rec.id, className: "skl-card" },
               /*#__PURE__*/React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' } },
@@ -2756,7 +2771,7 @@ function SkladLedger() {
                   /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } },
                     fmtDate(rec.date), rec.carrier ? ` · ${rec.carrier}` : '', rec.boxes ? ` · ${rec.boxes}` : '',
                     rec.incomeQty ? /*#__PURE__*/React.createElement("span", { style: { color: 'var(--positive)' } }, ` · приход ${rec.incomeQty} шт.`) : '')),
-                /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteReceiving(rec) },
+                role === 'fulfillment' && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteReceiving(rec) },
                   /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить")),
               rec.note && /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, marginTop: 8, color: 'var(--ink)' } }, rec.note),
               receivingItems(rec).length > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 10 } },
@@ -3241,7 +3256,12 @@ function SkladLedger() {
       color: 'var(--ink-soft)',
       marginTop: 3
     }
-  }, s.label)))), dashboardCharts), false && /*#__PURE__*/React.createElement("div", {
+  }, s.label)))), /*#__PURE__*/React.createElement("div", {
+    style: { marginBottom: 16 }
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "skl-btn skl-btn-ghost",
+    onClick: exportDashboard
+  }, /*#__PURE__*/React.createElement(Download, { size: 14 }), " Скачать сводку в Excel")), dashboardCharts), false && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,
@@ -3255,9 +3275,9 @@ function SkladLedger() {
       size: 16
     })
   }, {
-    key: 'ops',
-    label: 'Операции',
-    icon: /*#__PURE__*/React.createElement(Upload, {
+    key: 'receiving',
+    label: 'Приёмка машин',
+    icon: /*#__PURE__*/React.createElement(Clock, {
       size: 16
     })
   }, {
@@ -3303,7 +3323,7 @@ function SkladLedger() {
       justifyContent: 'center',
       padding: '0 4px'
     }
-  }, tzRequests.filter(r => r.status === 'new').length)))), (activeTab === 'ops' || aktPreview) && /*#__PURE__*/React.createElement(React.Fragment, null, activeTab === 'ops' && /*#__PURE__*/React.createElement(Section, {
+  }, tzRequests.filter(r => r.status === 'new').length)))), (activeTab === 'main' || aktPreview) && /*#__PURE__*/React.createElement(React.Fragment, null, activeTab === 'main' && /*#__PURE__*/React.createElement(Section, {
     title: "Списать для фотостудии",
     icon: /*#__PURE__*/React.createElement(Camera, {
       size: 18
