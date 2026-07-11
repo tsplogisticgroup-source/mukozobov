@@ -2565,21 +2565,40 @@ function SkladLedger() {
     }
     XLSX.writeFile(wb, `ostatki_${todayISO()}.xlsx`);
   }
-  // Экспорт сводки с дашборда (приход, отгружено, брак и т.д.) в Excel.
-  function exportDashboard() {
-    const rows = [
-      { 'Показатель': 'Артикулов', 'Значение': totals.sku },
-      { 'Показатель': 'Приход всего, шт.', 'Значение': totals.income },
-      { 'Показатель': 'Брак всего, шт.', 'Значение': totals.defect },
-      { 'Показатель': 'Фотостудия, шт.', 'Значение': totals.photo },
-      { 'Показатель': 'Обезличка, шт.', 'Значение': totals.unidentified },
-      { 'Показатель': 'Отгружено всего, шт.', 'Значение': totals.shipped },
-      { 'Показатель': 'Остаток на складе, шт.', 'Значение': totals.balance }
-    ];
+  // Экспорт данных конкретной плитки дашборда (только приход / только брак и т.д.).
+  function exportMetric(kind) {
+    const sz = s => s === NO_SIZE ? '' : s;
+    let rows = [], sheet = 'Данные', file = 'export';
+    if (kind === 'sku') {
+      rows = summary.map(s => ({ 'Артикул': s.article, 'Название': names[s.article] || '', 'Категория': articleCategory(s.article), 'Остаток, шт.': s.balance }));
+      sheet = 'Артикулы'; file = 'artikuly';
+    } else if (kind === 'income') {
+      rows = incomes.map(i => ({ 'Дата': i.date, 'Артикул': i.article, 'Размер': sz(i.size), 'Кол-во, шт.': i.qty, 'Комментарий': i.note || '' }));
+      sheet = 'Приход'; file = 'prihod';
+    } else if (kind === 'defect') {
+      rows = defects.map(d => ({ 'Дата': d.date, 'Артикул': d.article, 'Размер': sz(d.size), 'Кол-во, шт.': d.qty, 'Поставка': d.shipmentNumber || '', 'Комментарий': d.note || '' }));
+      sheet = 'Брак'; file = 'brak';
+    } else if (kind === 'photo') {
+      rows = photo.map(p => ({ 'Дата': p.date, 'Артикул': p.article, 'Размер': sz(p.size), 'Кол-во, шт.': p.qty, 'Комментарий': p.note || '' }));
+      sheet = 'Фотостудия'; file = 'fotostudiya';
+    } else if (kind === 'unidentified') {
+      const obez = shipments.filter(s => typeof s.note === 'string' && s.note.startsWith('обезличка'))
+        .map(s => ({ 'Дата': s.date, 'Артикул': s.article, 'Поставка': s.shipmentNumber || '', 'Кол-во, шт.': s.qty, 'Комментарий': s.note }));
+      const uni = unidentified.map(u => ({ 'Дата': u.date, 'Артикул': '', 'Поставка': u.shipmentNumber || '', 'Кол-во, шт.': u.qty, 'Комментарий': u.note || '' }));
+      rows = [...obez, ...uni];
+      sheet = 'Обезличка'; file = 'obezlichka';
+    } else if (kind === 'shipped') {
+      rows = shipments.map(s => ({ 'Дата': s.date, 'Артикул': s.article, 'Размер': sz(s.size), 'Кол-во, шт.': s.qty, 'Поставка': s.shipmentNumber || '', 'Комментарий': s.note || '' }));
+      sheet = 'Отгружено'; file = 'otgruzheno';
+    } else if (kind === 'balance') {
+      summary.forEach(s => s.sizes.forEach(z => rows.push({ 'Артикул': s.article, 'Размер': sz(z.size), 'Остаток, шт.': z.balance })));
+      sheet = 'Остаток'; file = 'ostatok';
+    }
+    if (!rows.length) { alert('Нет данных для выгрузки.'); return; }
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Сводка');
-    XLSX.writeFile(wb, `svodka_sklad_${todayISO()}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, sheet);
+    XLSX.writeFile(wb, `${file}_${todayISO()}.xlsx`);
   }
   function historyFor(article) {
     const ins = incomes.filter(i => i.article === article).map(i => _objectSpread(_objectSpread({}, i), {}, {
@@ -3182,6 +3201,7 @@ function SkladLedger() {
   }, [{
     label: 'Артикулов',
     value: totals.sku,
+    exportKind: 'sku',
     tone: 'accent',
     icon: /*#__PURE__*/React.createElement(Search, {
       size: 17
@@ -3189,6 +3209,7 @@ function SkladLedger() {
   }, {
     label: 'Приход всего',
     value: totals.income,
+    exportKind: 'income',
     tone: 'positive',
     icon: /*#__PURE__*/React.createElement(Box, {
       size: 17
@@ -3196,6 +3217,7 @@ function SkladLedger() {
   }, {
     label: 'Брак всего',
     value: totals.defect,
+    exportKind: 'defect',
     tone: 'negative',
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
       size: 17
@@ -3203,6 +3225,7 @@ function SkladLedger() {
   }, {
     label: 'Фотостудия',
     value: totals.photo,
+    exportKind: 'photo',
     tone: 'info',
     icon: /*#__PURE__*/React.createElement(Camera, {
       size: 17
@@ -3210,6 +3233,7 @@ function SkladLedger() {
   }, {
     label: 'Обезличка',
     value: totals.unidentified,
+    exportKind: 'unidentified',
     tone: 'warn',
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
       size: 17
@@ -3217,6 +3241,7 @@ function SkladLedger() {
   }, {
     label: 'Отгружено всего',
     value: totals.shipped,
+    exportKind: 'shipped',
     tone: 'positive',
     icon: /*#__PURE__*/React.createElement(Upload, {
       size: 17
@@ -3224,6 +3249,7 @@ function SkladLedger() {
   }, {
     label: 'Остаток на складе',
     value: totals.balance,
+    exportKind: 'balance',
     tone: 'accent',
     highlight: true,
     icon: /*#__PURE__*/React.createElement(Download, {
@@ -3237,12 +3263,19 @@ function SkladLedger() {
       borderColor: s.highlight ? 'var(--accent)' : 'var(--line)'
     }
   }, /*#__PURE__*/React.createElement("div", {
+    style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' }
+  }, /*#__PURE__*/React.createElement("div", {
     className: "skl-iconchip",
     style: {
       background: `var(--${s.tone}-soft)`,
       color: `var(--${s.tone})`
     }
-  }, s.icon), /*#__PURE__*/React.createElement("div", {
+  }, s.icon), /*#__PURE__*/React.createElement("button", {
+    title: `Скачать «${s.label}» в Excel`,
+    onClick: () => exportMetric(s.exportKind),
+    className: "skl-btn skl-btn-ghost",
+    style: { padding: '4px 7px', minHeight: 0, lineHeight: 1, color: 'var(--ink-soft)' }
+  }, /*#__PURE__*/React.createElement(Download, { size: 14 }))), /*#__PURE__*/React.createElement("div", {
     className: "skl-display",
     style: {
       fontSize: 27,
@@ -3256,12 +3289,7 @@ function SkladLedger() {
       color: 'var(--ink-soft)',
       marginTop: 3
     }
-  }, s.label)))), /*#__PURE__*/React.createElement("div", {
-    style: { marginBottom: 16 }
-  }, /*#__PURE__*/React.createElement("button", {
-    className: "skl-btn skl-btn-ghost",
-    onClick: exportDashboard
-  }, /*#__PURE__*/React.createElement(Download, { size: 14 }), " Скачать сводку в Excel")), dashboardCharts), false && /*#__PURE__*/React.createElement("div", {
+  }, s.label)))), dashboardCharts), false && /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
       gap: 8,
