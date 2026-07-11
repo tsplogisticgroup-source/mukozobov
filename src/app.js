@@ -2104,33 +2104,46 @@ function SkladLedger() {
       }) : p);
       persist(KEY_PHOTO, updatedPhoto, setPhoto);
     }
-    let unidEntry = null;
-    if (unidNoArt > 0) {
-      unidEntry = {
+    // Обезличка = неопознанный товар: фиксируем ВСЮ обезличку акта в счётчике
+    // «Неопознано» (и с коробом — она параллельно списана как отгрузка артикула,
+    // и без короба). Остаток при этом не трогаем — его двигают только отгрузки.
+    const unidEntries = [];
+    (aktPreview.unidentifiedShipments || []).forEach(u => {
+      if (u.qty > 0) unidEntries.push({
         id: uid(),
-        qty: unidNoArt,
+        qty: u.qty,
+        article: u.article,
         date,
         shipmentNumber,
-        note: `неопознанный товар (без короба/артикула) · поставка №${shipmentNumber}`,
+        note: `обезличка · отгружена как ${u.article} · поставка №${shipmentNumber}`,
         addedAt: new Date().toISOString()
-      };
-      persist(KEY_UNIDENTIFIED, [...unidentified, unidEntry], setUnidentified);
-    }
+      });
+    });
+    if (unidNoArt > 0) unidEntries.push({
+      id: uid(),
+      qty: unidNoArt,
+      date,
+      shipmentNumber,
+      note: `обезличка без короба/артикула · поставка №${shipmentNumber}`,
+      addedAt: new Date().toISOString()
+    });
+    if (unidEntries.length) persist(KEY_UNIDENTIFIED, [...unidentified, ...unidEntries], setUnidentified);
     if (aktNames && Object.keys(aktNames).length) {
       persist(KEY_NAMES, _objectSpread(_objectSpread({}, names), aktNames), setNames);
     }
     const totalQty = allShipEntries.reduce((s, e) => s + e.qty, 0);
     const uniShipQty = uniShipEntries.reduce((s, e) => s + e.qty, 0);
     const defQty = toRecord.reduce((s, d) => s + Number(d.recordQty), 0);
+    const unidTotal = unidEntries.reduce((s, e) => s + e.qty, 0);
     let label = `Акт приёмки №${shipmentNumber} от ${fmtDate(date)}: отгружено ${totalQty} шт.`;
     if (uniShipQty > 0) label += ` (в т.ч. обезличка ${uniShipQty})`;
     if (defQty > 0) label += `, брак ${defQty} шт.`;
-    if (unidNoArt > 0) label += `, неопознано ${unidNoArt} шт.`;
+    if (unidTotal > 0) label += `, обезличка/неопознано ${unidTotal} шт.`;
     const refs = {
       shipments: allShipEntries.map(e => e.id)
     };
     if (defEntries.length) refs.defects = defEntries.map(e => e.id);
-    if (unidEntry) refs.unidentified = [unidEntry.id];
+    if (unidEntries.length) refs.unidentified = unidEntries.map(e => e.id);
     // Если акт загружали из ТЗ — переводим его в «Отгружено» (списан с «принимается WB»).
     if (aktTzId) { updateTzStatus(aktTzId, 'done'); setAktTzId(null); }
     setAktPreview(null);
@@ -3185,7 +3198,7 @@ function SkladLedger() {
       size: 17
     })
   }, {
-    label: 'Неопознано',
+    label: 'Обезличка',
     value: totals.unidentified,
     tone: 'warn',
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
@@ -4560,7 +4573,7 @@ function SkladLedger() {
     label: 'Фотостудия, шт.',
     value: periodStats.photo
   }, {
-    label: 'Неопознано, шт.',
+    label: 'Обезличка, шт.',
     value: periodStats.unidentified
   }, {
     label: 'Поставок',
@@ -4578,7 +4591,7 @@ function SkladLedger() {
     style: {
       fontSize: 24,
       fontWeight: 700,
-      color: (s.label === 'Брак, шт.' || s.label === 'Неопознано, шт.') && s.value > 0 ? 'var(--negative)' : 'var(--ink)'
+      color: (s.label === 'Брак, шт.' || s.label === 'Обезличка, шт.') && s.value > 0 ? 'var(--negative)' : 'var(--ink)'
     }
   }, s.value), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -4760,7 +4773,7 @@ function SkladLedger() {
       padding: '4px 8px'
     }
   }, it.qty)))))))))))), unidentified.length > 0 && /*#__PURE__*/React.createElement(Section, {
-    title: "Неопознанный товар",
+    title: "Обезличка (неопознанный товар)",
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
       size: 18,
       color: "var(--warn)"
