@@ -2595,6 +2595,14 @@ function SkladLedger() {
     } else if (kind === 'balance') {
       summary.forEach(s => s.sizes.forEach(z => rows.push({ 'Артикул': s.article, 'Размер': sz(z.size), 'Остаток, шт.': z.balance })));
       sheet = 'Остаток'; file = 'ostatok';
+    } else if (kind === 'inWork' || kind === 'toWb') {
+      const st = kind === 'inWork' ? 'in_progress' : 'shipping';
+      tzRequests.filter(t => t.status === st).forEach(t => (t.rows || []).forEach(r => rows.push({
+        'Дата ТЗ': t.date, 'Склад WB': t.warehouse || '', 'Артикул': r.article,
+        'Короба': r.boxesLabel, 'Кол-во, шт.': r.qty
+      })));
+      sheet = kind === 'inWork' ? 'В работе' : 'Принимается WB';
+      file = kind === 'inWork' ? 'v_rabote' : 'prinimaetsya_wb';
     }
     if (!rows.length) { alert('Нет данных для выгрузки.'); return; }
     const ws = XLSX.utils.json_to_sheet(rows);
@@ -3252,6 +3260,22 @@ function SkladLedger() {
     exportKind: 'shipped',
     tone: 'positive',
     icon: /*#__PURE__*/React.createElement(Upload, {
+      size: 17
+    })
+  }, {
+    label: 'В работе',
+    value: totals.inWork,
+    exportKind: 'inWork',
+    tone: 'info',
+    icon: /*#__PURE__*/React.createElement(ClipboardList, {
+      size: 17
+    })
+  }, {
+    label: 'Принимается WB',
+    value: totals.toWb,
+    exportKind: 'toWb',
+    tone: 'warn',
+    icon: /*#__PURE__*/React.createElement(Box, {
       size: 17
     })
   }, {
