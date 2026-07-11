@@ -2104,46 +2104,36 @@ function SkladLedger() {
       }) : p);
       persist(KEY_PHOTO, updatedPhoto, setPhoto);
     }
-    // Обезличка = неопознанный товар: фиксируем ВСЮ обезличку акта в счётчике
-    // «Неопознано» (и с коробом — она параллельно списана как отгрузка артикула,
-    // и без короба). Остаток при этом не трогаем — его двигают только отгрузки.
-    const unidEntries = [];
-    (aktPreview.unidentifiedShipments || []).forEach(u => {
-      if (u.qty > 0) unidEntries.push({
+    // Обезличка без короба/артикула — отдельная запись. Обезличка с коробом уже
+    // записана как отгрузка (note 'обезличка …'); счётчик «Обезличка» суммирует и то,
+    // и другое из данных, поэтому здесь дублировать её не нужно.
+    let unidEntry = null;
+    if (unidNoArt > 0) {
+      unidEntry = {
         id: uid(),
-        qty: u.qty,
-        article: u.article,
+        qty: unidNoArt,
         date,
         shipmentNumber,
-        note: `обезличка · отгружена как ${u.article} · поставка №${shipmentNumber}`,
+        note: `обезличка без короба/артикула · поставка №${shipmentNumber}`,
         addedAt: new Date().toISOString()
-      });
-    });
-    if (unidNoArt > 0) unidEntries.push({
-      id: uid(),
-      qty: unidNoArt,
-      date,
-      shipmentNumber,
-      note: `обезличка без короба/артикула · поставка №${shipmentNumber}`,
-      addedAt: new Date().toISOString()
-    });
-    if (unidEntries.length) persist(KEY_UNIDENTIFIED, [...unidentified, ...unidEntries], setUnidentified);
+      };
+      persist(KEY_UNIDENTIFIED, [...unidentified, unidEntry], setUnidentified);
+    }
     if (aktNames && Object.keys(aktNames).length) {
       persist(KEY_NAMES, _objectSpread(_objectSpread({}, names), aktNames), setNames);
     }
     const totalQty = allShipEntries.reduce((s, e) => s + e.qty, 0);
     const uniShipQty = uniShipEntries.reduce((s, e) => s + e.qty, 0);
     const defQty = toRecord.reduce((s, d) => s + Number(d.recordQty), 0);
-    const unidTotal = unidEntries.reduce((s, e) => s + e.qty, 0);
+    const unidTotal = uniShipQty + unidNoArt;
     let label = `Акт приёмки №${shipmentNumber} от ${fmtDate(date)}: отгружено ${totalQty} шт.`;
-    if (uniShipQty > 0) label += ` (в т.ч. обезличка ${uniShipQty})`;
     if (defQty > 0) label += `, брак ${defQty} шт.`;
-    if (unidTotal > 0) label += `, обезличка/неопознано ${unidTotal} шт.`;
+    if (unidTotal > 0) label += `, обезличка ${unidTotal} шт.`;
     const refs = {
       shipments: allShipEntries.map(e => e.id)
     };
     if (defEntries.length) refs.defects = defEntries.map(e => e.id);
-    if (unidEntries.length) refs.unidentified = unidEntries.map(e => e.id);
+    if (unidEntry) refs.unidentified = [unidEntry.id];
     // Если акт загружали из ТЗ — переводим его в «Отгружено» (списан с «принимается WB»).
     if (aktTzId) { updateTzStatus(aktTzId, 'done'); setAktTzId(null); }
     setAktPreview(null);
@@ -2455,15 +2445,19 @@ function SkladLedger() {
     persist(KEY_GRIDS, next, setGrids);
     alert(`Готово! Сетки заполнены для ${filled} артикулов (из приходов). Проверь в остатках и подправь, где нужно.`);
   }
+  // Вся обезличка = записи без короба (unidentified) + отгрузки-обезлички (по пометке).
+  const obezlichkaShipped = useMemo(() =>
+    shipments.filter(s => typeof s.note === 'string' && s.note.startsWith('обезличка')).reduce((a, s) => a + s.qty, 0),
+    [shipments]);
   const totals = useMemo(() => ({
     sku: summary.length,
     income: summary.reduce((s, x) => s + x.income, 0),
     shipped: summary.reduce((s, x) => s + x.shipped, 0),
     defect: summary.reduce((s, x) => s + x.defect, 0),
     photo: summary.reduce((s, x) => s + x.photo, 0),
-    unidentified: unidentified.reduce((s, u) => s + u.qty, 0),
+    unidentified: unidentified.reduce((s, u) => s + u.qty, 0) + obezlichkaShipped,
     balance: summary.reduce((s, x) => s + x.balance, 0)
-  }), [summary, unidentified]);
+  }), [summary, unidentified, obezlichkaShipped]);
   const defectStats = useMemo(() => {
     const map = {};
     defects.forEach(d => {
@@ -2536,7 +2530,8 @@ function SkladLedger() {
       income: incomes.filter(i => inRange(i.date)).reduce((a, i) => a + i.qty, 0),
       defect: defects.filter(d => inRange(d.date)).reduce((a, d) => a + d.qty, 0),
       photo: photo.filter(p => inRange(p.date)).reduce((a, p) => a + p.qty, 0),
-      unidentified: unidentified.filter(u => inRange(u.date)).reduce((a, u) => a + u.qty, 0),
+      unidentified: unidentified.filter(u => inRange(u.date)).reduce((a, u) => a + u.qty, 0)
+        + shipments.filter(s => inRange(s.date) && typeof s.note === 'string' && s.note.startsWith('обезличка')).reduce((a, s) => a + s.qty, 0),
       shipmentsCount: numbers.size
     };
   }, [shipments, incomes, defects, photo, unidentified, statsFrom, statsTo]);
