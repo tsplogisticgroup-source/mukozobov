@@ -2456,6 +2456,8 @@ function SkladLedger() {
     defect: summary.reduce((s, x) => s + x.defect, 0),
     photo: summary.reduce((s, x) => s + x.photo, 0),
     unidentified: unidentified.reduce((s, u) => s + u.qty, 0) + obezlichkaShipped,
+    inWork: summary.reduce((s, x) => s + (x.inWork || 0), 0),
+    toWb: summary.reduce((s, x) => s + (x.toWb || 0), 0),
     balance: summary.reduce((s, x) => s + x.balance, 0)
   }), [summary, unidentified, obezlichkaShipped]);
   const defectStats = useMemo(() => {
@@ -2642,9 +2644,11 @@ function SkladLedger() {
   }, [dashWeekly]);
   const dashDonut = useMemo(() => {
     const b = Math.max(0, totals.balance), s = Math.max(0, totals.shipped), d = Math.max(0, totals.defect);
-    const sum = b + s + d || 1, C = 251.3, seg = v => (v / sum) * C;
-    return { segB: seg(b), segS: seg(s), segD: seg(d),
-      pctB: Math.round(b / sum * 100), pctS: Math.round(s / sum * 100), pctD: Math.round(d / sum * 100) };
+    const w = Math.max(0, totals.inWork), p = Math.max(0, totals.toWb);
+    const sum = b + w + p + s + d || 1, C = 251.3, seg = v => (v / sum) * C;
+    const pct = v => Math.round(v / sum * 100);
+    return { segB: seg(b), segW: seg(w), segP: seg(p), segS: seg(s), segD: seg(d),
+      pctB: pct(b), pctW: pct(w), pctP: pct(p), pctS: pct(s), pctD: pct(d) };
   }, [totals]);
   const maxBalance = Math.max(1, ...dashTop.map(a => a.balance));
   const dashRecent = actions.slice(0, 6);
@@ -2697,10 +2701,14 @@ function SkladLedger() {
           /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 100 100", width: 92, height: 92 },
             /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--card-2)", strokeWidth: 14 }),
             /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--accent)", strokeWidth: 14, strokeDasharray: `${dashDonut.segB} 251.3`, transform: "rotate(-90 50 50)" }),
-            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--positive)", strokeWidth: 14, strokeDasharray: `${dashDonut.segS} 251.3`, strokeDashoffset: -dashDonut.segB, transform: "rotate(-90 50 50)" }),
-            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--negative)", strokeWidth: 14, strokeDasharray: `${dashDonut.segD} 251.3`, strokeDashoffset: -(dashDonut.segB + dashDonut.segS), transform: "rotate(-90 50 50)" })),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--info)", strokeWidth: 14, strokeDasharray: `${dashDonut.segW} 251.3`, strokeDashoffset: -dashDonut.segB, transform: "rotate(-90 50 50)" }),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--warn)", strokeWidth: 14, strokeDasharray: `${dashDonut.segP} 251.3`, strokeDashoffset: -(dashDonut.segB + dashDonut.segW), transform: "rotate(-90 50 50)" }),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--positive)", strokeWidth: 14, strokeDasharray: `${dashDonut.segS} 251.3`, strokeDashoffset: -(dashDonut.segB + dashDonut.segW + dashDonut.segP), transform: "rotate(-90 50 50)" }),
+            /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--negative)", strokeWidth: 14, strokeDasharray: `${dashDonut.segD} 251.3`, strokeDashoffset: -(dashDonut.segB + dashDonut.segW + dashDonut.segP + dashDonut.segS), transform: "rotate(-90 50 50)" })),
           /*#__PURE__*/React.createElement("div", { style: { fontSize: 11.5, lineHeight: 1.9, color: 'var(--ink)' } },
             /*#__PURE__*/React.createElement("div", null, dot('var(--accent)'), "Остаток ", dashDonut.pctB, "%"),
+            /*#__PURE__*/React.createElement("div", null, dot('var(--info)'), "В работе ", dashDonut.pctW, "%"),
+            /*#__PURE__*/React.createElement("div", null, dot('var(--warn)'), "Принимается WB ", dashDonut.pctP, "%"),
             /*#__PURE__*/React.createElement("div", null, dot('var(--positive)'), "Отгружено ", dashDonut.pctS, "%"),
             /*#__PURE__*/React.createElement("div", null, dot('var(--negative)'), "Брак ", dashDonut.pctD, "%"))))),
     /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 13, marginBottom: 20 } },
