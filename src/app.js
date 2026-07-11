@@ -2718,7 +2718,15 @@ function SkladLedger() {
             /*#__PURE__*/React.createElement("div", null, dot('var(--info)'), "В работе ", dashDonut.pctW, "%"),
             /*#__PURE__*/React.createElement("div", null, dot('var(--warn)'), "Принимается WB ", dashDonut.pctP, "%"),
             /*#__PURE__*/React.createElement("div", null, dot('var(--positive)'), "Отгружено ", dashDonut.pctS, "%"),
-            /*#__PURE__*/React.createElement("div", null, dot('var(--negative)'), "Брак ", dashDonut.pctD, "%"))))),
+            /*#__PURE__*/React.createElement("div", null, dot('var(--negative)'), "Брак ", dashDonut.pctD, "%")), /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, flex: 1, marginLeft: 16 } },
+          [{ label: 'В работе', value: totals.inWork, tone: 'info', exportKind: 'inWork', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 16 }) },
+           { label: 'Принимается WB', value: totals.toWb, tone: 'warn', exportKind: 'toWb', icon: /*#__PURE__*/React.createElement(Box, { size: 16 }) }
+          ].map((s, i) => /*#__PURE__*/React.createElement("div", { key: i, className: "skl-card skl-metric", style: { flex: 1, padding: '13px 14px', background: 'var(--card-2)' } },
+            /*#__PURE__*/React.createElement("div", { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+              /*#__PURE__*/React.createElement("div", { className: "skl-iconchip", style: { background: `var(--${s.tone}-soft)`, color: `var(--${s.tone})` } }, s.icon),
+              /*#__PURE__*/React.createElement("button", { title: `Скачать «${s.label}» в Excel`, onClick: () => exportMetric(s.exportKind), className: "skl-btn skl-btn-ghost", style: { padding: '4px 7px', minHeight: 0, lineHeight: 1, color: 'var(--ink-soft)' } }, /*#__PURE__*/React.createElement(Download, { size: 14 }))),
+            /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 24, fontWeight: 700, marginTop: 9, color: `var(--${s.tone})` } }, s.value),
+            /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 } }, s.label))))))),
     /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 13, marginBottom: 20 } },
       /*#__PURE__*/React.createElement("div", { className: "skl-card" },
         /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600, marginBottom: 11 } }, "Топ артикулов по остатку"),
@@ -3260,22 +3268,6 @@ function SkladLedger() {
     exportKind: 'shipped',
     tone: 'positive',
     icon: /*#__PURE__*/React.createElement(Upload, {
-      size: 17
-    })
-  }, {
-    label: 'В работе',
-    value: totals.inWork,
-    exportKind: 'inWork',
-    tone: 'info',
-    icon: /*#__PURE__*/React.createElement(ClipboardList, {
-      size: 17
-    })
-  }, {
-    label: 'Принимается WB',
-    value: totals.toWb,
-    exportKind: 'toWb',
-    tone: 'warn',
-    icon: /*#__PURE__*/React.createElement(Box, {
       size: 17
     })
   }, {
