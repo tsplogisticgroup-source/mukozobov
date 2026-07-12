@@ -805,6 +805,7 @@ function SkladLedger() {
   }, [darkMode]);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false); // выдвижное меню на телефоне
   // Определяем узкий экран (телефон), чтобы схлопывать многоколоночные сетки.
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 760);
   useEffect(() => {
@@ -2991,15 +2992,17 @@ function SkladLedger() {
         .skl-metric { transition: transform .15s, border-color .15s; }
         .skl-metric:hover { transform: translateY(-2px); border-color: var(--accent); }
         .skl-root { padding: 24px 28px 28px 238px; min-height: 100vh; box-sizing: border-box; }
+        .skl-hamburger { display: none; }
+        .skl-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 70; animation: skl-fade .16s ease; }
         @media (max-width: 760px) {
-          .skl-root { padding: 14px; overflow-x: hidden; }
-          .skl-sidebar { position: static; width: auto; flex-direction: row; flex-wrap: wrap; z-index: auto;
-            border-right: none; border-bottom: 1px solid var(--line); margin-bottom: 14px; gap: 4px; }
-          .skl-side-logo { width: 100%; padding-bottom: 10px; }
-          .skl-nav { width: auto; padding: 9px 11px; font-size: 13.5px; gap: 8px; }
-          .skl-nav svg { width: 18px; height: 18px; }
-          .skl-side-user { display: none; }
-          .skl-topbar { flex-wrap: wrap; }
+          .skl-root { padding: 14px 14px 40px; overflow-x: hidden; }
+          /* Сайдбар — выдвижная панель слева (drawer) */
+          .skl-sidebar { transform: translateX(-100%); transition: transform .24s ease; width: 262px;
+            z-index: 80; box-shadow: none; }
+          .skl-sidebar.open { transform: translateX(0); box-shadow: 0 0 50px rgba(0,0,0,.6); }
+          .skl-hamburger { display: inline-flex; }
+          .skl-topbar { flex-wrap: wrap; margin-bottom: 16px; }
+          .skl-topbar h1 { font-size: 20px; }
           /* Широкие таблицы/сетки внутри карточек скроллятся, а не ломают страницу */
           .skl-card { overflow-x: auto; }
           .skl-card table { min-width: 520px; }
@@ -3129,8 +3132,11 @@ function SkladLedger() {
       fontSize: 12,
       color: 'var(--ink-soft)'
     }
-  }, "Вести учёт, загружать акты, обрабатывать ТЗ"))))) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("aside", {
-    className: "skl-sidebar"
+  }, "Вести учёт, загружать акты, обрабатывать ТЗ"))))) : /*#__PURE__*/React.createElement(React.Fragment, null, drawerOpen && /*#__PURE__*/React.createElement("div", {
+    className: "skl-backdrop",
+    onClick: () => setDrawerOpen(false)
+  }), /*#__PURE__*/React.createElement("aside", {
+    className: "skl-sidebar" + (drawerOpen ? " open" : "")
   }, /*#__PURE__*/React.createElement("div", {
     className: "skl-side-logo"
   }, /*#__PURE__*/React.createElement("div", {
@@ -3144,7 +3150,7 @@ function SkladLedger() {
     style: { display: 'flex', flexDirection: 'column', gap: 7 }
   }, navItems.map(n => /*#__PURE__*/React.createElement("button", {
     key: n.key,
-    onClick: () => { setActiveTab(n.key); setMenuOpen(false); },
+    onClick: () => { setActiveTab(n.key); setMenuOpen(false); setDrawerOpen(false); },
     className: "skl-nav" + (activeTab === n.key ? " on" : "")
   }, n.icon, /*#__PURE__*/React.createElement("span", null, n.label)))), /*#__PURE__*/React.createElement("div", {
     style: { flex: 1 }
@@ -3170,7 +3176,15 @@ function SkladLedger() {
     items: labelItems()
   }), /*#__PURE__*/React.createElement("div", {
     className: "skl-topbar"
-  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 } }, /*#__PURE__*/React.createElement("button", {
+    className: "skl-hamburger skl-iconbtn",
+    onClick: () => setDrawerOpen(true),
+    title: "Меню",
+    "aria-label": "Меню"
+  }, /*#__PURE__*/React.createElement("svg", { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" },
+    /*#__PURE__*/React.createElement("line", { x1: 3, y1: 6, x2: 21, y2: 6 }),
+    /*#__PURE__*/React.createElement("line", { x1: 3, y1: 12, x2: 21, y2: 12 }),
+    /*#__PURE__*/React.createElement("line", { x1: 3, y1: 18, x2: 21, y2: 18 }))), /*#__PURE__*/React.createElement("div", { style: { minWidth: 0 } }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
       color: 'var(--ink-soft)',
@@ -3181,7 +3195,7 @@ function SkladLedger() {
   }, "Учёт остатков · Wildberries"), /*#__PURE__*/React.createElement("h1", {
     className: "skl-display",
     style: { fontSize: 24, margin: 0 }
-  }, pageTitle)), /*#__PURE__*/React.createElement("div", {
+  }, pageTitle))), /*#__PURE__*/React.createElement("div", {
     style: { display: 'flex', gap: 8, alignItems: 'center' }
   }, saving && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 12, color: 'var(--ink-soft)', display: 'flex', alignItems: 'center', gap: 6 }
