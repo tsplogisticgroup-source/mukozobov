@@ -805,6 +805,15 @@ function SkladLedger() {
   }, [darkMode]);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
+  // Определяем узкий экран (телефон), чтобы схлопывать многоколоночные сетки.
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' && window.innerWidth <= 760);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 760px)');
+    const on = () => setIsMobile(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on); };
+  }, []);
   function chooseRole(r) {
     try {
       localStorage.setItem('sklad_role', r);
@@ -2687,7 +2696,7 @@ function SkladLedger() {
   const pageTitle = (navItems.find(n => n.key === activeTab) || navItems[0]).label;
   const dot = c => /*#__PURE__*/React.createElement("span", { style: { color: c } }, "● ");
   const dashboardCharts = /*#__PURE__*/React.createElement(React.Fragment, null,
-    /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 13, marginBottom: 13 } },
+    /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr', gap: 13, marginBottom: 13 } },
       /*#__PURE__*/React.createElement("div", { className: "skl-card" },
         /*#__PURE__*/React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
           /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600 } }, "Движение за 8 недель"),
@@ -2705,8 +2714,8 @@ function SkladLedger() {
               /*#__PURE__*/React.createElement("polyline", { points: dashChart.shp, fill: "none", stroke: "var(--positive)", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" }))),
       /*#__PURE__*/React.createElement("div", { className: "skl-card", style: { display: 'flex', flexDirection: 'column' } },
         /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600, marginBottom: 8 } }, "Структура"),
-        /*#__PURE__*/React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 16, flex: 1 } },
-          /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 100 100", width: 118, height: 118, style: { flex: 'none' } },
+        /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'stretch' : 'center', gap: 16, flex: 1 } },
+          /*#__PURE__*/React.createElement("svg", { viewBox: "0 0 100 100", width: 118, height: 118, style: { flex: 'none', alignSelf: isMobile ? 'center' : 'auto' } },
             /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--card-2)", strokeWidth: 14 }),
             /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--accent)", strokeWidth: 14, strokeDasharray: `${dashDonut.segB} 251.3`, transform: "rotate(-90 50 50)" }),
             /*#__PURE__*/React.createElement("circle", { cx: 50, cy: 50, r: 40, fill: "none", stroke: "var(--info)", strokeWidth: 14, strokeDasharray: `${dashDonut.segW} 251.3`, strokeDashoffset: -dashDonut.segB, transform: "rotate(-90 50 50)" }),
@@ -2718,7 +2727,7 @@ function SkladLedger() {
             /*#__PURE__*/React.createElement("div", null, dot('var(--info)'), "В работе ", dashDonut.pctW, "%"),
             /*#__PURE__*/React.createElement("div", null, dot('var(--warn)'), "Принимается WB ", dashDonut.pctP, "%"),
             /*#__PURE__*/React.createElement("div", null, dot('var(--positive)'), "Отгружено ", dashDonut.pctS, "%"),
-            /*#__PURE__*/React.createElement("div", null, dot('var(--negative)'), "Брак ", dashDonut.pctD, "%")), /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, flex: 1, marginLeft: 16 } },
+            /*#__PURE__*/React.createElement("div", null, dot('var(--negative)'), "Брак ", dashDonut.pctD, "%")), /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, flex: 1, marginLeft: isMobile ? 0 : 16 } },
           [{ label: 'В работе', value: totals.inWork, tone: 'info', exportKind: 'inWork', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 16 }) },
            { label: 'Принимается WB', value: totals.toWb, tone: 'warn', exportKind: 'toWb', icon: /*#__PURE__*/React.createElement(Box, { size: 16 }) }
           ].map((s, i) => /*#__PURE__*/React.createElement("div", { key: i, className: "skl-card skl-metric", style: { flex: 1, padding: '13px 14px', background: 'var(--card-2)' } },
@@ -2727,7 +2736,7 @@ function SkladLedger() {
               /*#__PURE__*/React.createElement("button", { title: `Скачать «${s.label}» в Excel`, onClick: () => exportMetric(s.exportKind), className: "skl-btn skl-btn-ghost", style: { padding: '4px 7px', minHeight: 0, lineHeight: 1, color: 'var(--ink-soft)' } }, /*#__PURE__*/React.createElement(Download, { size: 14 }))),
             /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 24, fontWeight: 700, marginTop: 9, color: `var(--${s.tone})` } }, s.value),
             /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 } }, s.label))))))),
-    /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 13, marginBottom: 20 } },
+    /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 13, marginBottom: 20 } },
       /*#__PURE__*/React.createElement("div", { className: "skl-card" },
         /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 14, fontWeight: 600, marginBottom: 11 } }, "Топ артикулов по остатку"),
         dashTop.length === 0
@@ -2983,12 +2992,17 @@ function SkladLedger() {
         .skl-metric:hover { transform: translateY(-2px); border-color: var(--accent); }
         .skl-root { padding: 24px 28px 28px 238px; min-height: 100vh; box-sizing: border-box; }
         @media (max-width: 760px) {
-          .skl-root { padding: 14px; }
+          .skl-root { padding: 14px; overflow-x: hidden; }
           .skl-sidebar { position: static; width: auto; flex-direction: row; flex-wrap: wrap; z-index: auto;
-            border-right: none; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+            border-right: none; border-bottom: 1px solid var(--line); margin-bottom: 14px; gap: 4px; }
           .skl-side-logo { width: 100%; padding-bottom: 10px; }
-          .skl-nav { width: auto; }
+          .skl-nav { width: auto; padding: 9px 11px; font-size: 13.5px; gap: 8px; }
+          .skl-nav svg { width: 18px; height: 18px; }
           .skl-side-user { display: none; }
+          .skl-topbar { flex-wrap: wrap; }
+          /* Широкие таблицы/сетки внутри карточек скроллятся, а не ломают страницу */
+          .skl-card { overflow-x: auto; }
+          .skl-card table { min-width: 520px; }
         }
 
         .skl-label-sheet { display: none; }
