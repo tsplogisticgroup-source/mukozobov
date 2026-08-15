@@ -1222,7 +1222,8 @@ function SkladLedger() {
       };
       const boxesRows = [['Баркод товара', 'Кол-во товаров', 'ШК короба', 'Срок годности']];
       const summaryMap = new Map();
-      const missing = [];
+      const noCatalog = []; // нет карточки/баркодов в каталоге WB
+      const noGrid = [];     // каталог есть, но не задан размерный ряд (ни сетки, ни остатка)
       for (const row of r.rows) {
         const boxes = Math.round(row.boxesNumeric || 0);
         if (boxes <= 0) continue;
@@ -1233,12 +1234,12 @@ function SkladLedger() {
         for (const c of articleCodes(row.article)) {
           if (labelArticles[c] && labelArticles[c].sizes.length) { data = labelArticles[c]; code = c; break; }
         }
-        if (!data) { missing.push(row.article); continue; }
+        if (!data) { noCatalog.push(row.article); continue; }
         const sizes = [...data.sizes].sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
         // Если задана размерная сетка артикула — берём её; иначе распределяем по остатку.
         const gv = gridVector(row.article);
         const vec = gv ? sizes.map(s => gv[String(s.size)] || 0) : distribute8(sizes.map(s => s.qty));
-        if (!vec || vec.reduce((a, b) => a + b, 0) === 0) { missing.push(row.article); continue; }
+        if (!vec || vec.reduce((a, b) => a + b, 0) === 0) { noGrid.push(row.article); continue; }
         for (let b = 0; b < boxes; b++) {
           const wb = 'WB_' + boxNum++;
           if (!firstLabel) labelDoc.addPage([LWmm, LHmm], 'landscape');
@@ -1254,7 +1255,10 @@ function SkladLedger() {
         }
       }
       if (boxesRows.length === 1) {
-        alert('Нет данных для генерации: у артикулов заявки нет остатка (размерный ряд берётся из остатка склада).');
+        let em = 'Нет данных для генерации.';
+        if (noCatalog.length) em += `\nНет в каталоге WB (синхронизируй каталог): ${noCatalog.join(', ')}`;
+        if (noGrid.length) em += `\nНет размерной сетки/остатка: ${noGrid.join(', ')}`;
+        alert(em);
         return;
       }
       const summaryRows = [['Баркод', 'Количество'], ...[...summaryMap.entries()].map(([bc, q]) => [bc, q])];
@@ -1267,7 +1271,8 @@ function SkladLedger() {
       triggerDownload(blob, `Поставка_WB_${fmtDate(r.date)}.zip`);
       const totalBoxes = boxesRows.slice(1).map(x => x[2]).filter((v, i, a) => a.indexOf(v) === i).length;
       let msg = `Готово! ${totalBoxes} коробов (до WB_${lastBox}).`;
-      if (missing.length) msg += `\nПропущены (нет остатка/каталога): ${missing.join(', ')}`;
+      if (noCatalog.length) msg += `\nПропущены — нет в каталоге WB (синхронизируй каталог): ${noCatalog.join(', ')}`;
+      if (noGrid.length) msg += `\nПропущены — нет размерной сетки/остатка: ${noGrid.join(', ')}`;
       alert(msg);
     } catch (e) {
       console.error(e);
