@@ -1224,16 +1224,21 @@ function SkladLedger() {
       const summaryMap = new Map();
       const missing = [];
       for (const row of r.rows) {
-        const code = row.article;
         const boxes = Math.round(row.boxesNumeric || 0);
         if (boxes <= 0) continue;
-        const data = labelArticles[code];
-        if (!data || !data.sizes.length) { missing.push(code); continue; }
+        // Каталог (баркоды) ищем по ЛЮБОМУ из кодов артикула — для двойных
+        // «238-2 = D9015-2» подходит любой из них. labelArticles ключуется по
+        // одиночным кодам, поэтому целую строку по ключу не найти.
+        let data = null, code = null;
+        for (const c of articleCodes(row.article)) {
+          if (labelArticles[c] && labelArticles[c].sizes.length) { data = labelArticles[c]; code = c; break; }
+        }
+        if (!data) { missing.push(row.article); continue; }
         const sizes = [...data.sizes].sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
         // Если задана размерная сетка артикула — берём её; иначе распределяем по остатку.
-        const gv = gridVector(code);
+        const gv = gridVector(row.article);
         const vec = gv ? sizes.map(s => gv[String(s.size)] || 0) : distribute8(sizes.map(s => s.qty));
-        if (!vec || vec.reduce((a, b) => a + b, 0) === 0) { missing.push(code); continue; }
+        if (!vec || vec.reduce((a, b) => a + b, 0) === 0) { missing.push(row.article); continue; }
         for (let b = 0; b < boxes; b++) {
           const wb = 'WB_' + boxNum++;
           if (!firstLabel) labelDoc.addPage([LWmm, LHmm], 'landscape');
