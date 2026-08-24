@@ -284,6 +284,7 @@ const KEY_CATALOG = 'sklad:catalog';
 const KEY_RECEIVING = 'sklad:receiving';
 const RECEIVING_BUCKET = 'receiving';
 const KEY_GRIDS = 'sklad:grids';
+const KEY_BRANDS = 'sklad:brands'; // code -> присвоенный бренд артикула
 const ACTIONS_KEEP = 50;
 const KEY_LAST_BACKUP = 'sklad:meta:lastBackup';
 const BACKUP_PREFIX = 'sklad:backup:';
@@ -750,6 +751,7 @@ function SkladLedger() {
   const [labelArticles, setLabelArticles] = useState({});
   const [catalog, setCatalog] = useState({});
   const [grids, setGrids] = useState({}); // code -> массив задвоенных размеров
+  const [brandMap, setBrandMap] = useState({}); // code -> присвоенный бренд
   const [receiving, setReceiving] = useState([]);
   const [recvDate, setRecvDate] = useState(() => todayISO());
   const [recvTruck, setRecvTruck] = useState('');
@@ -1004,6 +1006,11 @@ function SkladLedger() {
       const val = r ? JSON.parse(r.value) : {};
       setGrids(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
     } catch (_unusedGrids) {/* keep current data on error */}
+    try {
+      const r = await window.storage.get(KEY_BRANDS, true);
+      const val = r ? JSON.parse(r.value) : {};
+      setBrandMap(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
+    } catch (_unusedBrands) {/* keep current data on error */}
     setLoading(false);
   }
   async function persist(key, value, setter) {
@@ -2373,13 +2380,33 @@ function SkladLedger() {
     return null;
   }
   function articleCategory(a) { const c = catalogEntry(a); return (c && c.category) || ''; }
-  // Бренды артикула: если у кода несколько карточек WB (разные бренды) — все.
+  // Бренды артикула из каталога: если у кода несколько карточек WB — все.
   function articleBrands(a) {
     const c = catalogEntry(a);
     if (!c) return [];
     if (c.brands && c.brands.length) return c.brands;
     return c.brand ? [c.brand] : [];
   }
+  // Присвоенный бренд артикула. Приоритет: ручное присвоение → единственный бренд
+  // каталога → «Носим сутками» (уже принятый товар относим к основному бренду).
+  const DEFAULT_BRAND = 'Носим сутками';
+  function assignedBrand(a) {
+    const code = articleCode(a);
+    if (brandMap[code]) return brandMap[code];
+    const brands = articleBrands(a);
+    if (brands.length === 1) return brands[0];
+    return DEFAULT_BRAND;
+  }
+  function setArticleBrand(a, brand) {
+    persist(KEY_BRANDS, _objectSpread(_objectSpread({}, brandMap), {}, { [articleCode(a)]: brand }), setBrandMap);
+  }
+  // Все известные бренды (для выбора в списке).
+  const allBrands = useMemo(() => {
+    const set = new Set([DEFAULT_BRAND]);
+    Object.values(catalog).forEach(c => (c.brands || (c.brand ? [c.brand] : [])).forEach(b => b && set.add(b)));
+    Object.values(brandMap).forEach(b => b && set.add(b));
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [catalog, brandMap]);
   function articleAllSizes(a) {
     // размеры артикула: из каталога WB (по любому коду) или из остатка
     const cat = catalogEntry(a);
@@ -2614,7 +2641,7 @@ function SkladLedger() {
     const sz = s => s === NO_SIZE ? '' : s;
     let rows = [], sheet = 'Данные', file = 'export';
     if (kind === 'sku') {
-      rows = summary.map(s => ({ 'Артикул': s.article, 'Название': names[s.article] || '', 'Категория': articleCategory(s.article), 'Остаток, шт.': s.balance }));
+      rows = summary.map(s => ({ 'Артикул': s.article, 'Бренд': assignedBrand(s.article), 'Название': names[s.article] || '', 'Категория': articleCategory(s.article), 'Остаток, шт.': s.balance }));
       sheet = 'Артикулы'; file = 'artikuly';
     } else if (kind === 'income') {
       rows = incomes.map(i => ({ 'Дата': i.date, 'Артикул': i.article, 'Размер': sz(i.size), 'Кол-во, шт.': i.qty, 'Комментарий': i.note || '' }));
@@ -5230,10 +5257,13 @@ function SkladLedger() {
         size: 14
       }) : /*#__PURE__*/React.createElement(ChevronRight, {
         size: 14
-      }), row.article, articleBrands(row.article).map((b, bi) => /*#__PURE__*/React.createElement("span", {
-        key: bi,
-        style: { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--warn)', background: 'var(--warn-soft)', border: '1px solid var(--line)', borderRadius: 6, padding: '1px 6px', marginLeft: 6 }
-      }, b))), articleCategory(row.article) && /*#__PURE__*/React.createElement("div", {
+      }), row.article, /*#__PURE__*/React.createElement("select", {
+        value: assignedBrand(row.article),
+        title: "Бренд артикула",
+        onClick: e => e.stopPropagation(),
+        onChange: e => { e.stopPropagation(); setArticleBrand(row.article, e.target.value); },
+        style: { marginLeft: 8, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--warn)', background: 'var(--warn-soft)', border: '1px solid var(--line)', borderRadius: 6, padding: '2px 6px', cursor: 'pointer' }
+      }, allBrands.map(b => /*#__PURE__*/React.createElement("option", { key: b, value: b }, b)))), articleCategory(row.article) && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: 'var(--accent)',
