@@ -1601,7 +1601,7 @@ function SkladLedger() {
       function mmToPx(mm) {
         return Math.round(mm * MM);
       }
-      async function renderLabel(name, artCode, size, barcode, color) {
+      async function renderLabel(name, artCode, size, barcode, color, brand) {
         const cvs = document.createElement('canvas');
         cvs.width = LW_px;
         cvs.height = LH_px;
@@ -1632,7 +1632,7 @@ function SkladLedger() {
           if (lbl === 'art') return `Артикул: ${artCode}`;
           if (lbl === 'size') return `Размер: ${size}`;
           if (lbl === 'color') return color ? `Цвет: ${color}` : '';
-          if (lbl === 'brand') return 'Бренд: НОСИМ СУТКАМИ';
+          if (lbl === 'brand') return brand ? `Бренд: ${brand}` : '';
           if (lbl === 'ip') return 'ИП: Мукозобов Д.В.';
           return '';
         };
@@ -1736,7 +1736,7 @@ function SkladLedger() {
           for (let n = 0; n < count; n++) {
             if (!first) doc.addPage([LW_mm, LH_mm], 'landscape');
             first = false;
-            const imgData = await renderLabel(data.name, data.code, s.size, s.barcode, data.color);
+            const imgData = await renderLabel(data.name, data.code, s.size, s.barcode, data.color, data.brand);
             doc.addImage(imgData, 'PNG', 0, 0, LW_mm, LH_mm);
           }
         }
