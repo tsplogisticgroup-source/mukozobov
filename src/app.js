@@ -576,94 +576,65 @@ function ArticleCombobox({
   }
   return /*#__PURE__*/React.createElement("div", {
     ref: ref,
-    style: {
-      position: 'relative'
-    }
+    style: { position: 'relative' }
   }, /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "skl-input",
     style: {
-      textAlign: 'left',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      cursor: 'pointer',
-      gap: 6
+      textAlign: 'left', display: 'flex', justifyContent: 'space-between',
+      alignItems: 'center', cursor: 'pointer', gap: 8,
+      borderColor: open ? 'var(--accent)' : 'var(--line)'
     },
-    onClick: () => {
-      setOpen(o => !o);
-      setQuery('');
-    }
+    onClick: () => { setOpen(o => !o); setQuery(''); }
   }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap'
-    }
-  }, value || '—', names[value] ? ` — ${names[value]}` : ''), /*#__PURE__*/React.createElement(ChevronDown, {
-    size: 14,
-    style: {
-      flexShrink: 0,
-      color: 'var(--ink-soft)'
-    }
+    style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'baseline', gap: 8 }
+  }, value
+    ? /*#__PURE__*/React.createElement("span", { className: "skl-mono", style: { fontWeight: 700, color: 'var(--accent)' } }, value)
+    : /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)' } }, placeholder || 'Выбрать артикул'),
+    value && names[value] && /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, names[value])
+  ), /*#__PURE__*/React.createElement(ChevronDown, {
+    size: 15,
+    style: { flexShrink: 0, color: 'var(--ink-soft)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }
   })), open && /*#__PURE__*/React.createElement("div", {
     style: {
-      position: 'absolute',
-      zIndex: 30,
-      top: '100%',
-      left: 0,
-      right: 0,
-      marginTop: 4,
-      background: 'var(--card)',
-      border: '1px solid var(--line)',
-      borderRadius: 6,
-      boxShadow: '0 6px 16px rgba(0,0,0,0.18)',
-      overflow: 'hidden'
+      position: 'absolute', zIndex: 40, top: 'calc(100% + 6px)', left: 0, right: 0,
+      background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 12,
+      boxShadow: '0 18px 44px -12px rgba(0,0,0,.55)', overflow: 'hidden'
     }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { padding: 8, borderBottom: '1px solid var(--line)', background: 'var(--card-2)' }
   }, /*#__PURE__*/React.createElement("input", {
     autoFocus: true,
     className: "skl-input",
-    style: {
-      border: 'none',
-      borderBottom: '1px solid var(--line)',
-      borderRadius: 0
-    },
-    placeholder: "Поиск артикула…",
+    style: { height: 38 },
+    placeholder: "Поиск по коду или названию…",
     value: query,
     onChange: e => setQuery(e.target.value)
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      maxHeight: 220,
-      overflowY: 'auto'
-    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: { maxHeight: 300, overflowY: 'auto', padding: 6 }
   }, filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
-    style: {
-      padding: '10px 12px',
-      fontSize: 13,
-      color: 'var(--ink-soft)'
-    }
-  }, "Не найдено") : filtered.map(a => /*#__PURE__*/React.createElement("div", {
-    key: a,
-    className: "skl-row",
-    style: {
-      padding: '8px 12px',
-      cursor: 'pointer',
-      fontSize: 13
-    },
-    onClick: () => {
-      onChange(a);
-      setOpen(false);
-      setQuery('');
-    }
-  }, /*#__PURE__*/React.createElement("span", {
-    style: {
-      fontWeight: a === value ? 700 : 400
-    }
-  }, a), names[a] && /*#__PURE__*/React.createElement("span", {
-    style: {
-      color: 'var(--ink-soft)'
-    }
-  }, " — ", names[a]))))));
+    style: { padding: '16px 12px', fontSize: 13, color: 'var(--ink-soft)', textAlign: 'center' }
+  }, "Ничего не найдено") : filtered.map(a => {
+    const sel = a === value;
+    return /*#__PURE__*/React.createElement("div", {
+      key: a,
+      onClick: () => { onChange(a); setOpen(false); setQuery(''); },
+      onMouseEnter: e => { if (!sel) e.currentTarget.style.background = 'var(--row-hover)'; },
+      onMouseLeave: e => { if (!sel) e.currentTarget.style.background = 'transparent'; },
+      style: {
+        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px',
+        borderRadius: 8, cursor: 'pointer',
+        background: sel ? 'var(--accent-soft)' : 'transparent'
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "skl-mono",
+      style: { fontWeight: 700, color: sel ? 'var(--accent)' : 'var(--ink)', flex: 'none' }
+    }, a), names[a] && /*#__PURE__*/React.createElement("span", {
+      style: { color: 'var(--ink-soft)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }
+    }, names[a]), sel && /*#__PURE__*/React.createElement("span", {
+      style: { marginLeft: 'auto', color: 'var(--accent)', fontWeight: 700, flex: 'none' }
+    }, "✓"));
+  }))));
 }
 function Section({
   title,
