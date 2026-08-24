@@ -28,7 +28,8 @@ export default {
     if (!token) return json({ error: 'WB_TOKEN не задан в настройках воркера (Settings → Variables and Secrets).' }, 500);
 
     try {
-      const articles = {};
+      const articles = {};   // старый формат (совместимость): vendorCode -> {...}
+      const cardsOut = [];    // новый формат: каждая карточка отдельно (с брендом)
       let cursor = { limit: 100 };
 
       // Постранично забираем все карточки товаров (Content API v2).
@@ -50,20 +51,28 @@ export default {
         for (const c of cards) {
           const code = String(c.vendorCode || '').trim();
           if (!code) continue;
-          if (!articles[code]) {
-            articles[code] = {
-              name: c.title || '',
-              brand: c.brand || '',
-              category: c.subjectName || '',
-              sizes: {},
-            };
-          }
+          // Размеры → штрихкоды этой конкретной карточки (бренда).
+          const sizes = {};
           for (const s of (c.sizes || [])) {
             const size = String(s.techSize || s.wbSize || '').trim();
             const barcode = (s.skus || [])[0];
-            if (size && barcode && !articles[code].sizes[size]) {
-              articles[code].sizes[size] = String(barcode);
-            }
+            if (size && barcode && !sizes[size]) sizes[size] = String(barcode);
+          }
+          // Новый формат: не схлопываем карточки с одинаковым кодом — храним КАЖДУЮ
+          // (у одного кода может быть две карточки под разными брендами).
+          cardsOut.push({
+            vendorCode: code,
+            brand: c.brand || '',
+            category: c.subjectName || '',
+            title: c.title || '',
+            sizes,
+          });
+          // Старый формат: первая карточка кода (для совместимости со старым приложением).
+          if (!articles[code]) {
+            articles[code] = { name: c.title || '', brand: c.brand || '', category: c.subjectName || '', sizes: {} };
+          }
+          for (const [size, bc] of Object.entries(sizes)) {
+            if (!articles[code].sizes[size]) articles[code].sizes[size] = bc;
           }
         }
 
@@ -73,7 +82,7 @@ export default {
         cursor = { updatedAt: cur.updatedAt, nmID: cur.nmID, limit: 100 };
       }
 
-      return json({ articles, syncedAt: new Date().toISOString(), count: Object.keys(articles).length });
+      return json({ articles, cards: cardsOut, syncedAt: new Date().toISOString(), count: cardsOut.length });
     } catch (e) {
       return json({ error: String((e && e.message) || e) }, 500);
     }

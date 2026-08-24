@@ -1774,16 +1774,31 @@ function SkladLedger() {
       const res = await fetch(WB_PROXY_URL);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const wbArticles = data.articles || {};
-      // Нормализуем данные WB в каталог этикеток: ключ = код (первый токен артикула WB),
-      // берём название, бренд и размеры → штрихкоды. Тот же формат, что каталог из Excel.
+      // Нормализуем в каталог: ключ = код (первый токен артикула WB). Если у кода
+      // несколько карточек под разными брендами — храним ВСЕ (cards[]), не теряем.
       const cat = {};
-      for (const [vendorCode, v] of Object.entries(wbArticles)) {
-        const code = String(vendorCode).trim().split(/\s+/)[0];
-        if (!code) continue;
-        if (!cat[code]) cat[code] = { name: (v && v.name) || '', color: '', brand: (v && v.brand) || '', category: (v && v.category) || '', sizes: {} };
-        for (const [size, bc] of Object.entries((v && v.sizes) || {})) {
-          if (bc && !cat[code].sizes[size]) cat[code].sizes[size] = String(bc);
+      const addCard = (vendorCode, brand, category, name, sizes) => {
+        const code = String(vendorCode || '').trim().split(/\s+/)[0];
+        if (!code) return;
+        if (!cat[code]) cat[code] = { name: name || '', color: '', brand: brand || '', category: category || '', sizes: {}, brands: [], cards: [] };
+        const e = cat[code];
+        if (brand && !e.brands.includes(brand)) e.brands.push(brand);
+        if (!e.brand && brand) e.brand = brand;
+        if (!e.category && category) e.category = category;
+        if (!e.name && name) e.name = name;
+        // Слитые размеры (первый выигрывает) — для совместимости со старым кодом.
+        for (const [size, bc] of Object.entries(sizes || {})) {
+          if (bc && !e.sizes[size]) e.sizes[size] = String(bc);
+        }
+        e.cards.push({ brand: brand || '', category: category || '', name: name || '', sizes: sizes || {} });
+      };
+      if (Array.isArray(data.cards)) {
+        // Новый воркер: массив карточек с брендами — ничего не теряем.
+        for (const c of data.cards) addCard(c.vendorCode, c.brand, c.category, c.title || c.name, c.sizes);
+      } else {
+        // Старый воркер: карта по vendorCode (второй бренд одного кода уже слит).
+        for (const [vendorCode, v] of Object.entries(data.articles || {})) {
+          addCard(vendorCode, v && v.brand, v && v.category, v && v.name, v && v.sizes);
         }
       }
       if (!Object.keys(cat).length) throw new Error('WB вернул пустой каталог.');
@@ -2358,6 +2373,13 @@ function SkladLedger() {
     return null;
   }
   function articleCategory(a) { const c = catalogEntry(a); return (c && c.category) || ''; }
+  // Бренды артикула: если у кода несколько карточек WB (разные бренды) — все.
+  function articleBrands(a) {
+    const c = catalogEntry(a);
+    if (!c) return [];
+    if (c.brands && c.brands.length) return c.brands;
+    return c.brand ? [c.brand] : [];
+  }
   function articleAllSizes(a) {
     // размеры артикула: из каталога WB (по любому коду) или из остатка
     const cat = catalogEntry(a);
@@ -5208,7 +5230,10 @@ function SkladLedger() {
         size: 14
       }) : /*#__PURE__*/React.createElement(ChevronRight, {
         size: 14
-      }), row.article), articleCategory(row.article) && /*#__PURE__*/React.createElement("div", {
+      }), row.article, articleBrands(row.article).map((b, bi) => /*#__PURE__*/React.createElement("span", {
+        key: bi,
+        style: { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.03em', textTransform: 'uppercase', color: 'var(--warn)', background: 'var(--warn-soft)', border: '1px solid var(--line)', borderRadius: 6, padding: '1px 6px', marginLeft: 6 }
+      }, b))), articleCategory(row.article) && /*#__PURE__*/React.createElement("div", {
         style: {
           fontSize: 12,
           color: 'var(--accent)',
