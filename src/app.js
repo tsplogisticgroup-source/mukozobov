@@ -549,10 +549,14 @@ function ArticleCombobox({
   onChange,
   options,
   names,
-  placeholder
+  placeholder,
+  subtitle
 }) {
+  // Что показывать под кодом артикула: бренд (если передан subtitle) или название.
+  const sub = a => (subtitle ? subtitle(a) : (names[a] || ''));
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [rect, setRect] = useState(null);
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -561,6 +565,16 @@ function ArticleCombobox({
     }
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+  // Позиция выпадающего списка: рисуем его поверх всего (fixed), чтобы не обрезался
+  // родителями с overflow:hidden (карточка раздела).
+  useEffect(() => {
+    if (!open) return;
+    const update = () => { if (ref.current) setRect(ref.current.getBoundingClientRect()); };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => { window.removeEventListener('scroll', update, true); window.removeEventListener('resize', update); };
   }, [open]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -576,7 +590,7 @@ function ArticleCombobox({
   }
   return /*#__PURE__*/React.createElement("div", {
     ref: ref,
-    style: { position: 'relative' }
+    style: { position: 'relative', width: '100%', maxWidth: 460 }
   }, /*#__PURE__*/React.createElement("button", {
     type: "button",
     className: "skl-input",
@@ -591,13 +605,16 @@ function ArticleCombobox({
   }, value
     ? /*#__PURE__*/React.createElement("span", { className: "skl-mono", style: { fontWeight: 700, color: 'var(--accent)' } }, value)
     : /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)' } }, placeholder || 'Выбрать артикул'),
-    value && names[value] && /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, names[value])
+    value && sub(value) && /*#__PURE__*/React.createElement("span", { style: { color: 'var(--ink-soft)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sub(value))
   ), /*#__PURE__*/React.createElement(ChevronDown, {
     size: 15,
     style: { flexShrink: 0, color: 'var(--ink-soft)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }
   })), open && /*#__PURE__*/React.createElement("div", {
     style: {
-      position: 'absolute', zIndex: 40, top: 'calc(100% + 6px)', left: 0, right: 0,
+      position: 'fixed', zIndex: 1000,
+      top: rect ? rect.bottom + 6 : 0,
+      left: rect ? rect.left : 0,
+      width: rect ? rect.width : 'auto',
       background: 'var(--card)', border: '1px solid var(--line)', borderRadius: 12,
       boxShadow: '0 18px 44px -12px rgba(0,0,0,.55)', overflow: 'hidden'
     }
@@ -629,9 +646,9 @@ function ArticleCombobox({
     }, /*#__PURE__*/React.createElement("span", {
       className: "skl-mono",
       style: { fontWeight: 700, color: sel ? 'var(--accent)' : 'var(--ink)', flex: 'none' }
-    }, a), names[a] && /*#__PURE__*/React.createElement("span", {
+    }, a), sub(a) && /*#__PURE__*/React.createElement("span", {
       style: { color: 'var(--ink-soft)', fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }
-    }, names[a]), sel && /*#__PURE__*/React.createElement("span", {
+    }, sub(a)), sel && /*#__PURE__*/React.createElement("span", {
       style: { marginLeft: 'auto', color: 'var(--accent)', fontWeight: 700, flex: 'none' }
     }, "✓"));
   }))));
@@ -1208,11 +1225,10 @@ function SkladLedger() {
         // Каталог (баркоды) ищем по ЛЮБОМУ из кодов артикула — для двойных
         // «238-2 = D9015-2» подходит любой из них. labelArticles ключуется по
         // одиночным кодам, поэтому целую строку по ключу не найти.
-        let data = null, code = null;
-        for (const c of articleCodes(row.article)) {
-          if (labelArticles[c] && labelArticles[c].sizes.length) { data = labelArticles[c]; code = c; break; }
-        }
+        // Баркоды нужного бренда (по присвоенному бренду артикула), без учёта регистра.
+        const data = labelDataFor(row.article, assignedBrand(row.article));
         if (!data) { noCatalog.push(row.article); continue; }
+        const code = data.code;
         const sizes = [...data.sizes].sort((a, b) => (Number(a.size) || 0) - (Number(b.size) || 0));
         // Если задана размерная сетка артикула — берём её; иначе распределяем по остатку.
         const gv = gridVector(row.article);
@@ -1690,15 +1706,25 @@ function SkladLedger() {
       const combinedDoc = combine ? new jsPDF({ unit: 'mm', format: [LW_mm, LH_mm], orientation: 'landscape' }) : null;
       let combinedFirst = true;
       const blobs = [];
+      const needGrid = []; // артикулы без остатка и без размерной сетки — печатать нечем
       for (let idx = 0; idx < selected.length; idx++) {
         const [artStr, numBoxes] = selected[idx];
         const data = labelArticles[artStr];
         if (!data) continue; // артикула нет в каталоге — пропускаем
         setLabelProgress(`Генерирую ${idx + 1} из ${selected.length}: ${data.code}…`);
         await new Promise(r => setTimeout(r, 10));
-        const totalQty = data.sizes.reduce((s, x) => s + x.qty, 0);
-        if (!totalQty) continue;
-        const refBoxes = totalQty / BOX;
+        // Количество по размерам: приоритет — размерная сетка (остаток НЕ нужен),
+        // иначе распределяем по остатку. Нет ни сетки, ни остатка → просим сетку.
+        const gv = gridVector(artStr);
+        let sizeCount;
+        if (gv) {
+          sizeCount = s => (gv[String(s.size)] || 0) * numBoxes;
+        } else {
+          const totalQty = data.sizes.reduce((a, x) => a + x.qty, 0);
+          if (!totalQty) { needGrid.push(data.code); continue; }
+          const refBoxes = totalQty / BOX;
+          sizeCount = s => Math.round(s.qty / refBoxes * numBoxes);
+        }
         const doc = combine ? combinedDoc : new jsPDF({
           unit: 'mm',
           format: [LW_mm, LH_mm],
@@ -1706,7 +1732,7 @@ function SkladLedger() {
         });
         let first = combine ? combinedFirst : true;
         for (const s of [...data.sizes].sort((a, b) => a.size - b.size)) {
-          const count = Math.round(s.qty / refBoxes * numBoxes);
+          const count = sizeCount(s);
           for (let n = 0; n < count; n++) {
             if (!first) doc.addPage([LW_mm, LH_mm], 'landscape');
             first = false;
@@ -1732,7 +1758,12 @@ function SkladLedger() {
         setLabelProgress('');
         return blobs;
       }
-      setLabelProgress(`Готово! Скачано ${selected.length} PDF файл(ов).`);
+      if (needGrid.length) {
+        setLabelProgress('');
+        alert(`Не хватает размерной сетки — этикетки не напечатаны для: ${needGrid.join(', ')}.\nЗадай сетку (сумма 8) прямо в строке артикула ниже и повтори.`);
+      } else {
+        setLabelProgress(`Готово! Скачано ${selected.length} PDF файл(ов).`);
+      }
     } catch (e) {
       console.error(e);
       setLabelError('Ошибка генерации: ' + e.message);
@@ -2298,20 +2329,36 @@ function SkladLedger() {
     for (const code of Object.keys(catalog)) {
       const c = catalog[code];
       const stock = summary.find(s => s.article === canonArticle(code));
-      out[code] = {
-        code,
-        name: c.name || '',
-        color: c.color || '',
-        sizes: Object.keys(c.sizes || {}).map(size => {
-          const sz = stock && stock.sizes.find(x => String(x.size) === String(size));
-          const num = parseInt(size);
-          return {
-            size: isNaN(num) ? size : num,
-            barcode: String(c.sizes[size]),
-            qty: sz ? sz.income : 0
-          };
-        })
-      };
+      // Группируем карточки по бренду: у одного кода может быть несколько карточек
+      // (напр. 94-1 под LOFERS и под «Носим сутками») — каждая становится отдельной
+      // позицией «код · бренд», со своими штрихкодами.
+      const byBrand = {};
+      const cards = (c.cards && c.cards.length) ? c.cards : [{ brand: c.brand || '', name: c.name || '', sizes: c.sizes || {} }];
+      cards.forEach(card => {
+        const b = card.brand || '';
+        if (!byBrand[b]) byBrand[b] = { brand: b, name: card.name || c.name || '', sizes: {} };
+        Object.entries(card.sizes || {}).forEach(([s, bc]) => { if (bc && !byBrand[b].sizes[s]) byBrand[b].sizes[s] = String(bc); });
+      });
+      const variants = Object.values(byBrand);
+      const multi = variants.length > 1;
+      variants.forEach(v => {
+        const key = multi ? `${code} · ${v.brand || '—'}` : code;
+        out[key] = {
+          code,
+          brand: v.brand || '',
+          name: v.name || '',
+          color: '',
+          sizes: Object.keys(v.sizes).map(size => {
+            const sz = stock && stock.sizes.find(x => String(x.size) === String(size));
+            const num = parseInt(size);
+            return {
+              size: isNaN(num) ? size : num,
+              barcode: String(v.sizes[size]),
+              qty: sz ? sz.income : 0
+            };
+          })
+        };
+      });
     }
     setLabelArticles(out);
   }, [catalog, summary]);
@@ -2361,22 +2408,38 @@ function SkladLedger() {
   // Присвоенный бренд артикула. Приоритет: ручное присвоение → единственный бренд
   // каталога → «Носим сутками» (уже принятый товар относим к основному бренду).
   const DEFAULT_BRAND = 'Носим сутками';
+  const brandEq = (x, y) => String(x || '').trim().toLowerCase() === String(y || '').trim().toLowerCase();
   function assignedBrand(a) {
     const code = articleCode(a);
-    if (brandMap[code]) return brandMap[code];
     const brands = articleBrands(a);
+    if (brandMap[code]) {
+      // вернуть каталожное написание бренда, если оно совпадает по смыслу с выбранным
+      return brands.find(b => brandEq(b, brandMap[code])) || brandMap[code];
+    }
     if (brands.length === 1) return brands[0];
-    return DEFAULT_BRAND;
+    // по умолчанию — вариант «Носим сутками» в его каталожном написании (напр. «НОСИМ СУТКАМИ»)
+    return brands.find(b => brandEq(b, DEFAULT_BRAND)) || DEFAULT_BRAND;
+  }
+  // Данные каталога (баркоды) для артикула и нужного бренда — по .code и .brand,
+  // без учёта регистра. Так печатается ПРАВИЛЬНЫЙ баркод нужного бренда.
+  function labelDataFor(article, brand) {
+    const codes = articleCodes(article);
+    const entries = Object.values(labelArticles).filter(v => v.sizes.length && codes.includes(v.code));
+    if (entries.length <= 1) return entries[0] || null;
+    if (brand) { const m = entries.find(v => brandEq(v.brand, brand)); if (m) return m; }
+    return entries[0];
   }
   function setArticleBrand(a, brand) {
     persist(KEY_BRANDS, _objectSpread(_objectSpread({}, brandMap), {}, { [articleCode(a)]: brand }), setBrandMap);
   }
   // Все известные бренды (для выбора в списке).
   const allBrands = useMemo(() => {
-    const set = new Set([DEFAULT_BRAND]);
-    Object.values(catalog).forEach(c => (c.brands || (c.brand ? [c.brand] : [])).forEach(b => b && set.add(b)));
-    Object.values(brandMap).forEach(b => b && set.add(b));
-    return [...set].sort((a, b) => a.localeCompare(b));
+    const byLower = new Map(); // нижний регистр -> каталожное написание (без дублей по регистру)
+    const add = b => { if (b && !byLower.has(b.trim().toLowerCase())) byLower.set(b.trim().toLowerCase(), b.trim()); };
+    Object.values(catalog).forEach(c => (c.brands || (c.brand ? [c.brand] : [])).forEach(add));
+    Object.values(brandMap).forEach(add);
+    add(DEFAULT_BRAND);
+    return [...byLower.values()].sort((a, b) => a.localeCompare(b));
   }, [catalog, brandMap]);
   function articleAllSizes(a) {
     // размеры артикула: из каталога WB (по любому коду) или из остатка
@@ -3466,7 +3529,8 @@ function SkladLedger() {
     value: it.article,
     onChange: v => updatePhotoRow(it.id, 'article', v),
     options: photoArticleOptions,
-    names: names
+    names: names,
+    subtitle: assignedBrand
   })), /*#__PURE__*/React.createElement("div", null, idx === 0 && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 12,
@@ -3971,7 +4035,8 @@ function SkladLedger() {
       value: it.article,
       onChange: v => updateTzRow(it.id, 'article', v),
       options: photoArticleOptions,
-      names: names
+      names: names,
+      subtitle: assignedBrand
     })), /*#__PURE__*/React.createElement("div", null, idx === 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
@@ -4414,6 +4479,7 @@ function SkladLedger() {
     },
     options: Object.keys(labelArticles).filter(a => !labelSelected.find(s => s.artStr === a)),
     names: Object.fromEntries(Object.entries(labelArticles).map(([k, v]) => [k, v.name])),
+    subtitle: a => (labelArticles[a] && labelArticles[a].brand) || assignedBrand(a),
     placeholder: "Начни вводить артикул или название…"
   })), labelSelected.length > 0 && /*#__PURE__*/React.createElement("table", {
     style: {
@@ -4458,11 +4524,14 @@ function SkladLedger() {
     const totalQty = data.sizes.reduce((s, x) => s + x.qty, 0);
     const refBoxes = totalQty / 8;
     const sortedSizes = [...data.sizes].sort((a, b) => a.size - b.size);
-    const grid = refBoxes > 0
-      ? sortedSizes.map(s => `${s.size}×${Math.round(s.qty / refBoxes)}`).join(', ')
-      : sortedSizes.map(s => s.size).join(', ') + ' — нет остатка';
-    return /*#__PURE__*/React.createElement("tr", {
-      key: artStr,
+    const gv = gridVector(artStr);
+    const needGridRow = !gv && totalQty <= 0;
+    const grid = gv
+      ? Object.entries(gv).filter(([, c]) => c > 0).sort((a, b) => (Number(a[0]) || 0) - (Number(b[0]) || 0)).map(([sz, c]) => `${sz}×${c}`).join(', ')
+      : (refBoxes > 0 ? sortedSizes.map(s => `${s.size}×${Math.round(s.qty / refBoxes)}`).join(', ') : '⚠ задай сетку ниже');
+    return /*#__PURE__*/React.createElement(React.Fragment, {
+      key: artStr
+    }, /*#__PURE__*/React.createElement("tr", {
       style: {
         borderTop: '1px solid var(--line)'
       }
@@ -4509,7 +4578,12 @@ function SkladLedger() {
       onClick: () => setLabelSelected(prev => prev.filter(s => s.artStr !== artStr))
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 12
-    }))));
+    })))), needGridRow && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
+      colSpan: 5,
+      style: { padding: '4px 8px 14px', background: 'var(--paper)' }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: 'var(--warn)', marginBottom: 8 }
+    }, "Нет остатка и сетки — отметь размеры (нет / ×1 / ×2, сумма 8), чтобы напечатать:"), sizeGridEditor(artStr))));
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: 'flex',
