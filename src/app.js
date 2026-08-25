@@ -2713,6 +2713,34 @@ function SkladLedger() {
     XLSX.utils.book_append_sheet(wb, ws, sheet);
     XLSX.writeFile(wb, `${file}_${todayISO()}.xlsx`);
   }
+  // Выгрузка всех карточек WB: артикул, бренд, размер, баркод (+ название, категория).
+  function exportCatalog() {
+    const rows = [];
+    Object.keys(catalog).forEach(code => {
+      const c = catalog[code];
+      const cards = (c.cards && c.cards.length) ? c.cards : [{ brand: c.brand || '', name: c.name || '', sizes: c.sizes || {} }];
+      cards.forEach(card => {
+        Object.entries(card.sizes || {}).forEach(([size, bc]) => {
+          rows.push({
+            'Артикул': code,
+            'Бренд': card.brand || '',
+            'Размер': size,
+            'Баркод': String(bc),
+            'Название': card.name || c.name || '',
+            'Категория': c.category || ''
+          });
+        });
+      });
+    });
+    if (!rows.length) { alert('Каталог пуст — сначала нажми «Синхронизировать с WB».'); return; }
+    rows.sort((a, b) => a['Артикул'].localeCompare(b['Артикул'], undefined, { numeric: true })
+      || a['Бренд'].localeCompare(b['Бренд'])
+      || (Number(a['Размер']) || 0) - (Number(b['Размер']) || 0));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Карточки WB');
+    XLSX.writeFile(wb, `kartochki_wb_${todayISO()}.xlsx`);
+  }
   function historyFor(article) {
     const ins = incomes.filter(i => i.article === article).map(i => _objectSpread(_objectSpread({}, i), {}, {
       type: 'income'
@@ -4434,7 +4462,12 @@ function SkladLedger() {
     className: "skl-btn skl-btn-primary",
     disabled: syncingBarcodes,
     onClick: () => syncBarcodes()
-  }, /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), syncingBarcodes ? " Синхронизирую…" : " Синхронизировать с WB"), barcodesSyncedAt && /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), syncingBarcodes ? " Синхронизирую…" : " Синхронизировать с WB"), /*#__PURE__*/React.createElement("button", {
+    className: "skl-btn skl-btn-ghost",
+    onClick: exportCatalog,
+    disabled: Object.keys(catalog).length === 0,
+    title: "Все карточки WB: артикул, бренд, размер, баркод"
+  }, /*#__PURE__*/React.createElement(Download, { size: 14 }), " Скачать карточки (Excel)"), barcodesSyncedAt && /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 12, color: 'var(--ink-soft)' }
   }, "обновлено с WB: ", fmtDate(String(barcodesSyncedAt).slice(0, 10))), /*#__PURE__*/React.createElement("span", {
     style: { fontSize: 12, color: 'var(--ink-soft)' }
