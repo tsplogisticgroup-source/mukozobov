@@ -294,6 +294,8 @@ const KEY_RECEIVING = 'sklad:receiving';
 const RECEIVING_BUCKET = 'receiving';
 const KEY_GRIDS = 'sklad:grids';
 const KEY_BRANDS = 'sklad:brands'; // code -> присвоенный бренд артикула
+const KEY_FBS_ASSIGN = 'sklad:fbs_assignments'; // индекс заданий на сборку FBS
+const FBS_ASSIGN_PREFIX = 'sklad:fbs_assignment:'; // детали задания (по одному ключу на задание)
 const ACTIONS_KEEP = 50;
 const KEY_LAST_BACKUP = 'sklad:meta:lastBackup';
 const BACKUP_PREFIX = 'sklad:backup:';
@@ -782,6 +784,16 @@ function SkladLedger() {
     setFbsWarehouse(n);
     try { localStorage.setItem('fbs_wh', String(n)); } catch (_) {}
   }
+  // Задания на сборку (волны): индекс заданий + фильтры формирования задания.
+  const [fbsAssignments, setFbsAssignments] = useState([]); // [{id,name,createdAt,orderIds,total,done}]
+  const [showFbsCreate, setShowFbsCreate] = useState(false);
+  const [fbsCreateArticles, setFbsCreateArticles] = useState([]); // выбранные коды артикулов (пусто = все)
+  const [fbsCreateAges, setFbsCreateAges] = useState([]); // выбранные возрастные корзины (пусто = любой)
+  const [fbsCreateLimit, setFbsCreateLimit] = useState(''); // сколько заказов (пусто = все)
+  const [fbsCreateOrder, setFbsCreateOrder] = useState('old'); // old | new
+  const [fbsCreateName, setFbsCreateName] = useState('');
+  const [fbsCreateSearch, setFbsCreateSearch] = useState('');
+  const [fbsCreating, setFbsCreating] = useState(false);
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
@@ -1023,6 +1035,11 @@ function SkladLedger() {
       const val = r ? JSON.parse(r.value) : {};
       setBrandMap(prev => Object.keys(val).length === 0 && Object.keys(prev).length > 0 ? prev : val);
     } catch (_unusedBrands) {/* keep current data on error */}
+    try {
+      const r = await window.storage.get(KEY_FBS_ASSIGN, true);
+      const val = r ? JSON.parse(r.value) : [];
+      setFbsAssignments(Array.isArray(val) ? val : []);
+    } catch (_unusedFbsA) {/* keep current data on error */}
     setLoading(false);
   }
   async function persist(key, value, setter) {
@@ -2057,6 +2074,89 @@ function SkladLedger() {
   const fbsFiltered = useMemo(() =>
     fbsOrders.filter(o => o.warehouseId === FBS_WAREHOUSE_ID),
     [fbsOrders]);
+  // Возраст заказа (часы → корзина) для фильтра при формировании задания.
+  const FBS_AGE_BUCKETS = [
+    { key: '0-1', label: 'до 1 сут' },
+    { key: '1-2', label: '1–2 сут' },
+    { key: '2-3', label: '2–3 сут' },
+    { key: '3-4', label: '3–4 сут' },
+    { key: '4-5', label: '4–5 сут' },
+    { key: '5-6', label: '5–6 сут' },
+    { key: '6+', label: '6+ сут' },
+  ];
+  function fbsAgeBucket(createdAt) {
+    const h = (Date.now() - new Date(createdAt).getTime()) / 36e5;
+    if (h < 24) return '0-1';
+    if (h < 48) return '1-2';
+    if (h < 72) return '2-3';
+    if (h < 96) return '3-4';
+    if (h < 120) return '4-5';
+    if (h < 144) return '5-6';
+    return '6+';
+  }
+  // Заказы, уже закреплённые за какими-то заданиями (нельзя выдать дважды).
+  const fbsAssignedSet = useMemo(() => {
+    const s = new Set();
+    fbsAssignments.forEach(a => (a.orderIds || []).forEach(id => s.add(id)));
+    return s;
+  }, [fbsAssignments]);
+  // Свободные заказы (склад ФФ Слава, ещё не в задании).
+  const fbsAvailable = useMemo(() =>
+    fbsFiltered.filter(o => !fbsAssignedSet.has(o.id)),
+    [fbsFiltered, fbsAssignedSet]);
+  // Возрастные корзины со счётчиками (по свободным заказам).
+  const fbsAgeGroups = useMemo(() => {
+    const cnt = {};
+    fbsAvailable.forEach(o => { const k = fbsAgeBucket(o.createdAt); cnt[k] = (cnt[k] || 0) + 1; });
+    return FBS_AGE_BUCKETS.filter(b => cnt[b.key]).map(b => ({ ...b, count: cnt[b.key] }));
+  }, [fbsAvailable]);
+  // Товары для отбора — СГРУППИРОВАНЫ ПО АРТИКУЛУ (не по размерам), с учётом фильтра возраста.
+  const fbsArticleGroups = useMemo(() => {
+    const base = fbsCreateAges.length ? fbsAvailable.filter(o => fbsCreateAges.includes(fbsAgeBucket(o.createdAt))) : fbsAvailable;
+    const q = fbsCreateSearch.trim().toLowerCase();
+    const m = {};
+    base.forEach(o => {
+      if (!m[o.code]) m[o.code] = { code: o.code, name: names[o.code] || articleCategory(o.code) || '', brand: o.brand, count: 0, firstAt: o.createdAt };
+      m[o.code].count += 1;
+      if (new Date(o.createdAt) < new Date(m[o.code].firstAt)) m[o.code].firstAt = o.createdAt;
+    });
+    let list = Object.values(m);
+    if (q) list = list.filter(g => g.code.toLowerCase().includes(q) || (g.name || '').toLowerCase().includes(q));
+    return list.sort((a, b) => b.count - a.count || a.code.localeCompare(b.code, undefined, { numeric: true }));
+  }, [fbsAvailable, fbsCreateAges, fbsCreateSearch, names]);
+  // Создание задания: отбираем свободные заказы по фильтрам, закрепляем за заданием.
+  async function createFbsAssignment() {
+    let base = fbsAvailable;
+    if (fbsCreateAges.length) base = base.filter(o => fbsCreateAges.includes(fbsAgeBucket(o.createdAt)));
+    if (fbsCreateArticles.length) base = base.filter(o => fbsCreateArticles.includes(o.code));
+    base = [...base].sort((a, b) => fbsCreateOrder === 'old'
+      ? new Date(a.createdAt) - new Date(b.createdAt)
+      : new Date(b.createdAt) - new Date(a.createdAt));
+    const lim = Number(fbsCreateLimit) || 0;
+    if (lim > 0) base = base.slice(0, lim);
+    if (!base.length) { alert('Под фильтр не попал ни один свободный заказ.'); return; }
+    setFbsCreating(true);
+    try {
+      const id = uid();
+      const name = fbsCreateName.trim() || `Задание ${fbsAssignments.length + 1}`;
+      const orders = base.map(o => ({ orderId: o.id, rid: o.rid, code: o.code, article: o.article, size: o.size, barcode: o.barcode, brand: o.brand, nmId: o.nmId, chrtId: o.chrtId, done: false, sgtin: '' }));
+      await window.storage.set(FBS_ASSIGN_PREFIX + id, JSON.stringify({ id, name, createdAt: new Date().toISOString(), orders }));
+      const entry = { id, name, createdAt: new Date().toISOString(), orderIds: base.map(o => o.id), total: base.length, done: 0 };
+      await persist(KEY_FBS_ASSIGN, [entry, ...fbsAssignments], setFbsAssignments);
+      logAction(`FBS: создано «${name}» — ${base.length} заказов`, {});
+      setShowFbsCreate(false);
+      setFbsCreateArticles([]); setFbsCreateAges([]); setFbsCreateLimit(''); setFbsCreateName(''); setFbsCreateSearch('');
+    } catch (e) {
+      console.error(e); alert('Не удалось создать задание: ' + (e.message || e));
+    } finally {
+      setFbsCreating(false);
+    }
+  }
+  async function deleteFbsAssignment(a) {
+    if (!window.confirm(`Удалить задание «${a.name}»? Его заказы вернутся в свободные.`)) return;
+    try { await window.storage.delete(FBS_ASSIGN_PREFIX + a.id); } catch (_) {}
+    await persist(KEY_FBS_ASSIGN, fbsAssignments.filter(x => x.id !== a.id), setFbsAssignments);
+  }
   // Лист подбора: группируем заказы по коду+размеру+бренду, считаем количество.
   const fbsPickList = useMemo(() => {
     const map = {};
@@ -3188,31 +3288,80 @@ function SkladLedger() {
         type: "file", accept: "image/*", capture: "environment", multiple: true, style: { display: 'none' },
         onChange: e => setFiles(Array.from(e.target.files || []))
       })));
+  const fbsTh = { padding: '6px 10px', fontWeight: 500 };
+  const fbsTd = { padding: '7px 10px' };
+  const fbsLbl = { fontSize: 12, color: 'var(--ink-soft)', marginBottom: 5 };
   const fbsContent = /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement(Section, { title: "Сборочные задания FBS", icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
-      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 } },
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsBusy, onClick: syncFbsOrders },
           /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), fbsBusy ? " Загружаю…" : " Обновить заказы"),
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsAvailable.length === 0, onClick: () => setShowFbsCreate(v => !v) },
+          /*#__PURE__*/React.createElement(Plus, { size: 14 }), " Создать задание"),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, "Склад: ",
           /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, FBS_WAREHOUSE_NAME)),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
-          fbsSyncedAt ? `Заказов (${FBS_WAREHOUSE_NAME}): ${fbsFiltered.length} · обновлено ${new Date(fbsSyncedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : 'Нажми «Обновить заказы»')),
-      fbsError && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginBottom: 10 } }, fbsError),
-      /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)' } }, "Порядок сборки: отсканируй EAN товара → Честный Знак → печатается стикер FBS. (Станция сканирования — следующим шагом.)")),
-    /*#__PURE__*/React.createElement(Section, { title: `Лист подбора (${fbsPickList.reduce((s, r) => s + r.qty, 0)} шт.)`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
-      fbsPickList.length === 0
-        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Заказов нет. Обнови список выше.")
-        : /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto' } }, /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
-            /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left', borderBottom: '1px solid var(--line)' } },
-              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 } }, "Артикул"),
-              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 } }, "Бренд"),
-              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 } }, "Размер"),
-              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 }, className: "skl-mono" }, "Собрать, шт."))),
-            /*#__PURE__*/React.createElement("tbody", null, fbsPickList.map((r, i) => /*#__PURE__*/React.createElement("tr", { key: i, style: { borderTop: '1px solid var(--line)' } },
-              /*#__PURE__*/React.createElement("td", { className: "skl-mono", style: { padding: '7px 10px', fontWeight: 700, color: 'var(--accent)' } }, r.code),
-              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, r.brand || '—'),
-              /*#__PURE__*/React.createElement("td", { className: "skl-mono", style: { padding: '7px 10px' } }, r.size || '—'),
-              /*#__PURE__*/React.createElement("td", { className: "skl-mono", style: { padding: '7px 10px', fontWeight: 700 } }, r.qty))))))));
+          fbsSyncedAt ? `Заказов: ${fbsFiltered.length} · свободно: ${fbsAvailable.length} · в заданиях: ${fbsAssignedSet.size}` : 'Нажми «Обновить заказы»')),
+      fbsError && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginTop: 10 } }, fbsError)),
+    showFbsCreate && /*#__PURE__*/React.createElement(Section, { title: "Новое задание на сборку", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 14 } },
+        /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("div", { style: fbsLbl }, "Название / станция"),
+          /*#__PURE__*/React.createElement("input", { className: "skl-input", value: fbsCreateName, onChange: e => setFbsCreateName(e.target.value), placeholder: "напр. Станция 1" })),
+        /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("div", { style: fbsLbl }, "Сколько заказов (пусто = все)"),
+          /*#__PURE__*/React.createElement("input", { className: "skl-input", type: "number", min: "1", value: fbsCreateLimit, onChange: e => setFbsCreateLimit(e.target.value), placeholder: "все" })),
+        /*#__PURE__*/React.createElement("label", null, /*#__PURE__*/React.createElement("div", { style: fbsLbl }, "Порядок отбора"),
+          /*#__PURE__*/React.createElement("select", { className: "skl-input", value: fbsCreateOrder, onChange: e => setFbsCreateOrder(e.target.value) },
+            /*#__PURE__*/React.createElement("option", { value: "old" }, "Сначала старые"),
+            /*#__PURE__*/React.createElement("option", { value: "new" }, "Сначала новые")))),
+      /*#__PURE__*/React.createElement("div", { style: { marginBottom: 12 } },
+        /*#__PURE__*/React.createElement("div", { style: fbsLbl }, "Возраст заказов (пусто = любой)"),
+        /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
+          fbsAgeGroups.length === 0 ? /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, "нет свободных заказов")
+            : fbsAgeGroups.map(b => {
+              const on = fbsCreateAges.includes(b.key);
+              return /*#__PURE__*/React.createElement("button", { key: b.key, className: "skl-btn skl-btn-ghost",
+                style: { borderColor: on ? 'var(--accent)' : 'var(--line)', color: on ? 'var(--accent)' : 'var(--ink)', fontWeight: on ? 700 : 500 },
+                onClick: () => setFbsCreateAges(prev => prev.includes(b.key) ? prev.filter(x => x !== b.key) : [...prev, b.key]) },
+                `${b.label} · ${b.count}`);
+            }))),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 } },
+        /*#__PURE__*/React.createElement("span", { style: fbsLbl }, "Артикулы (пусто = все). Отметь артикул целиком:"),
+        /*#__PURE__*/React.createElement("input", { className: "skl-input", style: { maxWidth: 260 }, value: fbsCreateSearch, onChange: e => setFbsCreateSearch(e.target.value), placeholder: "поиск по артикулу / названию" })),
+      /*#__PURE__*/React.createElement("div", { style: { maxHeight: 340, overflowY: 'auto', overflowX: 'auto', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12 } },
+        /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
+          /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left' } },
+            /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', width: 34 } }, ""),
+            /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Артикул"),
+            /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Бренд"),
+            /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 }, className: "skl-mono" }, "Заказов"),
+            /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Первый заказ"))),
+          /*#__PURE__*/React.createElement("tbody", null, fbsArticleGroups.map(g => {
+            const on = fbsCreateArticles.includes(g.code);
+            return /*#__PURE__*/React.createElement("tr", { key: g.code, className: "skl-row",
+              style: { borderTop: '1px solid var(--line)', cursor: 'pointer', background: on ? 'var(--accent-soft)' : 'transparent' },
+              onClick: () => setFbsCreateArticles(prev => prev.includes(g.code) ? prev.filter(x => x !== g.code) : [...prev, g.code]) },
+              /*#__PURE__*/React.createElement("td", { style: fbsTd }, /*#__PURE__*/React.createElement("input", { type: "checkbox", checked: on, readOnly: true })),
+              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, g.code), g.name ? ` ${g.name}` : ''),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, g.brand || '—'),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontWeight: 700 }, className: "skl-mono" }, g.count),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, fmtDate(String(g.firstAt).slice(0, 10))));
+          })))),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsCreating, onClick: createFbsAssignment },
+          /*#__PURE__*/React.createElement(Plus, { size: 14 }), fbsCreating ? " Создаю…" : " Подобрать и добавить"),
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: () => setShowFbsCreate(false) }, "Отмена"),
+        /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
+          `Выбрано: ${fbsCreateArticles.length || 'все'} арт. · возраст: ${fbsCreateAges.length || 'любой'}`))),
+    /*#__PURE__*/React.createElement(Section, { title: `Задания (${fbsAssignments.length})`, icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
+      fbsAssignments.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Заданий пока нет. Создай задание кнопкой «Создать задание».")
+        : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+            fbsAssignments.map(a => /*#__PURE__*/React.createElement("div", { key: a.id, className: "skl-card", style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
+              /*#__PURE__*/React.createElement("div", null,
+                /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 15, fontWeight: 700 } }, a.name),
+                /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } }, `${a.total} заказов · создано ${fmtDate(String(a.createdAt).slice(0, 10))}`)),
+              /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteFbsAssignment(a) },
+                /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить"))))));
   const receivingContent = /*#__PURE__*/React.createElement(React.Fragment, null,
     role === 'fulfillment' && /*#__PURE__*/React.createElement(Section, { title: "Новая приёмка машины", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 } },
