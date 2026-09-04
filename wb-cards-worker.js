@@ -1,15 +1,21 @@
-// Cloudflare Worker — посредник к WB Content API для этикеток.
-// Токен WB хранится в СЕКРЕТЕ воркера (переменная окружения WB_TOKEN), НЕ в коде.
-// Приложение делает GET на адрес воркера → получает {articles, syncedAt, count}.
+// Cloudflare Worker — посредник к API Wildberries.
+//   • GET  /                — Content API (каталог этикеток): {articles, cards, syncedAt}.
+//   • GET  /fbs/orders/new  — FBS: новые сборочные задания.
+//   • GET  /fbs/orders/status?ids=1,2 — статусы заказов (тело в query нельзя, поэтому ids через запятую).
+//   • POST /fbs/stickers    — FBS: стикеры на заказы (тело {orders:[id,...]}).
+//   • POST /fbs/supplies                    — создать поставку (тело {name}).
+//   • GET  /fbs/supplies?limit=&next=       — список поставок.
+//   • PATCH /fbs/supplies/{id}/orders/{oid} — добавить заказ в поставку.
+//   • PATCH /fbs/supplies/{id}/deliver      — отгрузить поставку.
+//   • GET  /fbs/supplies/{id}/barcode?type=png — ШК/QR короба поставки.
 //
-// Деплой:
-//   1. dash.cloudflare.com → Workers & Pages → нужный воркер → Edit code → вставить этот файл.
-//   2. Settings → Variables and Secrets → добавить секрет WB_TOKEN = <твой токен Контент WB>.
-//   3. Deploy.
+// Секреты воркера (Settings → Variables and Secrets):
+//   WB_TOKEN    — токен Контент (для каталога/этикеток).
+//   WB_MP_TOKEN — токен «Маркетплейс» (для FBS).
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -20,10 +26,74 @@ function json(obj, status = 200) {
   });
 }
 
+// Прозрачный прокси к WB: возвращаем тело и статус как есть, добавляя CORS.
+async function proxy(wbUrl, method, mpToken, body) {
+  const res = await fetch(wbUrl, {
+    method,
+    headers: { Authorization: mpToken, 'Content-Type': 'application/json' },
+    body: body || undefined,
+  });
+  const text = await res.text();
+  return new Response(text || '{}', {
+    status: res.status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS },
+  });
+}
+
+const MP = 'https://marketplace-api.wildberries.ru';
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
 
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // ── FBS (Marketplace API) ────────────────────────────────────────────────
+    if (path.startsWith('/fbs/')) {
+      const mp = env.WB_MP_TOKEN;
+      if (!mp) return json({ error: 'WB_MP_TOKEN не задан в настройках воркера (Settings → Variables and Secrets).' }, 500);
+      try {
+        if (path === '/fbs/orders/new' && request.method === 'GET') {
+          return await proxy(`${MP}/api/v3/orders/new`, 'GET', mp);
+        }
+        if (path === '/fbs/orders/status' && request.method === 'GET') {
+          const ids = (url.searchParams.get('ids') || '').split(',').map(s => Number(s.trim())).filter(Boolean);
+          return await proxy(`${MP}/api/v3/orders/status`, 'POST', mp, JSON.stringify({ orders: ids }));
+        }
+        if (path === '/fbs/stickers' && request.method === 'POST') {
+          const qs = url.search || '?type=png&width=58&height=40';
+          const body = await request.text();
+          return await proxy(`${MP}/api/v3/orders/stickers${qs}`, 'POST', mp, body);
+        }
+        if (path === '/fbs/supplies' && request.method === 'GET') {
+          const qs = url.search || '?limit=50';
+          return await proxy(`${MP}/api/v3/supplies${qs}`, 'GET', mp);
+        }
+        if (path === '/fbs/supplies' && request.method === 'POST') {
+          const body = await request.text();
+          return await proxy(`${MP}/api/v3/supplies`, 'POST', mp, body);
+        }
+        const mAdd = path.match(/^\/fbs\/supplies\/([^/]+)\/orders\/([^/]+)$/);
+        if (mAdd && request.method === 'PATCH') {
+          return await proxy(`${MP}/api/v3/supplies/${mAdd[1]}/orders/${mAdd[2]}`, 'PATCH', mp);
+        }
+        const mDeliver = path.match(/^\/fbs\/supplies\/([^/]+)\/deliver$/);
+        if (mDeliver && request.method === 'PATCH') {
+          return await proxy(`${MP}/api/v3/supplies/${mDeliver[1]}/deliver`, 'PATCH', mp);
+        }
+        const mBarcode = path.match(/^\/fbs\/supplies\/([^/]+)\/barcode$/);
+        if (mBarcode && request.method === 'GET') {
+          const qs = url.search || '?type=png';
+          return await proxy(`${MP}/api/v3/supplies/${mBarcode[1]}/barcode${qs}`, 'GET', mp);
+        }
+        return json({ error: `Неизвестный FBS-маршрут: ${request.method} ${path}` }, 404);
+      } catch (e) {
+        return json({ error: String((e && e.message) || e) }, 500);
+      }
+    }
+
+    // ── Content API (каталог этикеток) — прежнее поведение на корне ───────────
     const token = env.WB_TOKEN;
     if (!token) return json({ error: 'WB_TOKEN не задан в настройках воркера (Settings → Variables and Secrets).' }, 500);
 
