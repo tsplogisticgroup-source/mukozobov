@@ -2028,6 +2028,18 @@ function SkladLedger() {
       setFbsBusy(false);
     }
   }
+  // Склады — прямо из заказов (warehouseId + offices), с количеством заказов.
+  // Так список работает без отдельного запроса и показывает только «живые» склады.
+  const fbsWarehouseOptions = useMemo(() => {
+    const m = {};
+    fbsOrders.forEach(o => {
+      const id = o.warehouseId;
+      if (!id) return;
+      if (!m[id]) m[id] = { id, name: (o.offices || []).join(' · '), count: 0 };
+      m[id].count += 1;
+    });
+    return Object.values(m).sort((a, b) => b.count - a.count);
+  }, [fbsOrders]);
   // Заказы только выбранного склада (если склад не выбран — все).
   const fbsFiltered = useMemo(() =>
     fbsWarehouse ? fbsOrders.filter(o => o.warehouseId === fbsWarehouse) : fbsOrders,
@@ -3169,9 +3181,9 @@ function SkladLedger() {
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsBusy, onClick: syncFbsOrders },
           /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), fbsBusy ? " Загружаю…" : " Обновить заказы"),
         /*#__PURE__*/React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink-soft)' } }, "Склад:",
-          /*#__PURE__*/React.createElement("select", { className: "skl-input", style: { width: 'auto', minWidth: 180 }, value: fbsWarehouse || '', onChange: e => chooseFbsWarehouse(e.target.value) },
-            /*#__PURE__*/React.createElement("option", { value: "" }, "— все склады —"),
-            fbsWarehouses.map(w => /*#__PURE__*/React.createElement("option", { key: w.id, value: w.id }, w.name || `Склад ${w.id}`)))),
+          /*#__PURE__*/React.createElement("select", { className: "skl-input", style: { width: 'auto', minWidth: 220 }, value: fbsWarehouse || '', onChange: e => chooseFbsWarehouse(e.target.value) },
+            /*#__PURE__*/React.createElement("option", { value: "" }, `— все склады (${fbsOrders.length}) —`),
+            fbsWarehouseOptions.map(w => /*#__PURE__*/React.createElement("option", { key: w.id, value: w.id }, `${w.name || 'Склад ' + w.id} — ${w.count}`)))),
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsBusy || fbsFiltered.length === 0, onClick: () => printFbsStickers(fbsFiltered) },
           /*#__PURE__*/React.createElement(Printer, { size: 14 }), ` Печать стикеров (${fbsFiltered.length})`),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
