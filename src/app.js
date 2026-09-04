@@ -3195,8 +3195,6 @@ function SkladLedger() {
           /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), fbsBusy ? " Загружаю…" : " Обновить заказы"),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, "Склад: ",
           /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, FBS_WAREHOUSE_NAME)),
-        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsBusy || fbsFiltered.length === 0, onClick: () => printFbsStickers(fbsFiltered) },
-          /*#__PURE__*/React.createElement(Printer, { size: 14 }), ` Печать стикеров (${fbsFiltered.length})`),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
           fbsSyncedAt ? `Заказов (${FBS_WAREHOUSE_NAME}): ${fbsFiltered.length} · обновлено ${new Date(fbsSyncedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : 'Нажми «Обновить заказы»')),
       fbsError && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginBottom: 10 } }, fbsError),
