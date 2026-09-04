@@ -54,6 +54,9 @@ export default {
       const mp = env.WB_MP_TOKEN;
       if (!mp) return json({ error: 'WB_MP_TOKEN не задан в настройках воркера (Settings → Variables and Secrets).' }, 500);
       try {
+        if (path === '/fbs/warehouses' && request.method === 'GET') {
+          return await proxy(`${MP}/api/v3/warehouses`, 'GET', mp);
+        }
         if (path === '/fbs/orders/new' && request.method === 'GET') {
           return await proxy(`${MP}/api/v3/orders/new`, 'GET', mp);
         }
