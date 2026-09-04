@@ -2028,9 +2028,20 @@ function SkladLedger() {
       setFbsBusy(false);
     }
   }
-  // Склады — прямо из заказов (warehouseId + offices), с количеством заказов.
-  // Так список работает без отдельного запроса и показывает только «живые» склады.
+  // Кол-во заказов по складам (warehouseId → count).
+  const fbsWhCounts = useMemo(() => {
+    const m = {};
+    fbsOrders.forEach(o => { if (o.warehouseId) m[o.warehouseId] = (m[o.warehouseId] || 0) + 1; });
+    return m;
+  }, [fbsOrders]);
+  // Список складов: если пришли названия ваших ФФ из WB (/fbs/warehouses) — берём их
+  // (напр. «ФФ Целиком», «Реутов»); иначе запасной вариант — город склада из заказов.
   const fbsWarehouseOptions = useMemo(() => {
+    if (fbsWarehouses.length) {
+      return fbsWarehouses
+        .map(w => ({ id: w.id, name: w.name || ('Склад ' + w.id), count: fbsWhCounts[w.id] || 0 }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    }
     const m = {};
     fbsOrders.forEach(o => {
       const id = o.warehouseId;
@@ -2039,7 +2050,7 @@ function SkladLedger() {
       m[id].count += 1;
     });
     return Object.values(m).sort((a, b) => b.count - a.count);
-  }, [fbsOrders]);
+  }, [fbsWarehouses, fbsWhCounts, fbsOrders]);
   // Заказы только выбранного склада (если склад не выбран — все).
   const fbsFiltered = useMemo(() =>
     fbsWarehouse ? fbsOrders.filter(o => o.warehouseId === fbsWarehouse) : fbsOrders,

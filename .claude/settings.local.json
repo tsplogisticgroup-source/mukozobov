@@ -200,7 +200,8 @@
       "Bash(node \"C:/Users/imya/AppData/Local/Temp/claude/C--Users-imya-Desktop-WMS-----------/96dd8db5-8dce-47a9-b83e-8c2f671b2674/scratchpad/fulltext.mjs\")",
       "Bash(node \"C:/Users/imya/AppData/Local/Temp/claude/C--Users-imya-Desktop-WMS-----------/96dd8db5-8dce-47a9-b83e-8c2f671b2674/scratchpad/decodeall.js\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/app.js)",
-      "Bash(node --check wb-cards-worker.js)"
+      "Bash(node --check wb-cards-worker.js)",
+      "Bash(curl -s \"https://shrill-term-ab11.tsplogisticgroup.workers.dev/fbs/warehouses\")"
     ]
   }
 }
