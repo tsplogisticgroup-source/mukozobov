@@ -2051,10 +2051,12 @@ function SkladLedger() {
     });
     return Object.values(m).sort((a, b) => b.count - a.count);
   }, [fbsWarehouses, fbsWhCounts, fbsOrders]);
-  // Заказы только выбранного склада (если склад не выбран — все).
+  // Работаем ТОЛЬКО со складом «ФФ Слава» — остальные ФФ не наши.
+  const FBS_WAREHOUSE_ID = 1986962;
+  const FBS_WAREHOUSE_NAME = 'ФФ Слава';
   const fbsFiltered = useMemo(() =>
-    fbsWarehouse ? fbsOrders.filter(o => o.warehouseId === fbsWarehouse) : fbsOrders,
-    [fbsOrders, fbsWarehouse]);
+    fbsOrders.filter(o => o.warehouseId === FBS_WAREHOUSE_ID),
+    [fbsOrders]);
   // Лист подбора: группируем заказы по коду+размеру+бренду, считаем количество.
   const fbsPickList = useMemo(() => {
     const map = {};
@@ -3191,16 +3193,13 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsBusy, onClick: syncFbsOrders },
           /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), fbsBusy ? " Загружаю…" : " Обновить заказы"),
-        /*#__PURE__*/React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--ink-soft)' } }, "Склад:",
-          /*#__PURE__*/React.createElement("select", { className: "skl-input", style: { width: 'auto', minWidth: 220 }, value: fbsWarehouse || '', onChange: e => chooseFbsWarehouse(e.target.value) },
-            /*#__PURE__*/React.createElement("option", { value: "" }, `— все склады (${fbsOrders.length}) —`),
-            fbsWarehouseOptions.map(w => /*#__PURE__*/React.createElement("option", { key: w.id, value: w.id }, `${w.name || 'Склад ' + w.id} — ${w.count}`)))),
+        /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, "Склад: ",
+          /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, FBS_WAREHOUSE_NAME)),
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsBusy || fbsFiltered.length === 0, onClick: () => printFbsStickers(fbsFiltered) },
           /*#__PURE__*/React.createElement(Printer, { size: 14 }), ` Печать стикеров (${fbsFiltered.length})`),
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
-          fbsSyncedAt ? `Заказов на складе: ${fbsFiltered.length} из ${fbsOrders.length} · обновлено ${new Date(fbsSyncedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : 'Нажми «Обновить заказы»')),
+          fbsSyncedAt ? `Заказов (${FBS_WAREHOUSE_NAME}): ${fbsFiltered.length} · обновлено ${new Date(fbsSyncedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : 'Нажми «Обновить заказы»')),
       fbsError && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginBottom: 10 } }, fbsError),
-      !fbsWarehouse && fbsOrders.length > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--warn)', marginBottom: 10 } }, "Выбери свой склад в списке выше — иначе показаны заказы всех складов."),
       /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)' } }, "Порядок сборки: отсканируй EAN товара → Честный Знак → печатается стикер FBS. (Станция сканирования — следующим шагом.)")),
     /*#__PURE__*/React.createElement(Section, { title: `Лист подбора (${fbsPickList.reduce((s, r) => s + r.qty, 0)} шт.)`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
       fbsPickList.length === 0
