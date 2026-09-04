@@ -44,6 +44,15 @@ const Plus = p => /*#__PURE__*/React.createElement(Icon, _objectSpread(_objectSp
     y2: "12"
   }))
 }));
+const Printer = p => /*#__PURE__*/React.createElement(Icon, _objectSpread(_objectSpread({}, p), {}, {
+  paths: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("polyline", {
+    points: "6 9 6 2 18 2 18 9"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"
+  }), /*#__PURE__*/React.createElement("rect", {
+    x: "6", y: "14", width: "12", height: "8"
+  }))
+}));
 const Upload = p => /*#__PURE__*/React.createElement(Icon, _objectSpread(_objectSpread({}, p), {}, {
   paths: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
     d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
@@ -519,8 +528,9 @@ function LabelPrintView({
           window.JsBarcode(el, item.barcode, {
             format,
             displayValue: true,
-            fontSize: 12,
-            height: 40,
+            fontSize: 14,
+            height: 45,
+            width: 2,
             margin: 0
           });
         } catch (e) {
@@ -536,13 +546,12 @@ function LabelPrintView({
   }, items.map((item, i) => /*#__PURE__*/React.createElement("div", {
     className: "skl-label",
     key: i
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "lbl-article"
-  }, item.article, " ", item.size !== NO_SIZE ? `· ${item.size}` : ''), item.name && /*#__PURE__*/React.createElement("div", {
-    className: "lbl-meta"
-  }, item.name), /*#__PURE__*/React.createElement("svg", {
-    id: `barcode-${i}`
-  }))));
+  }, item.name && /*#__PURE__*/React.createElement("div", { className: "lbl-name" }, item.name),
+    /*#__PURE__*/React.createElement("div", { className: "lbl-article" }, "Артикул: ", item.article),
+    item.size !== NO_SIZE && /*#__PURE__*/React.createElement("div", { className: "lbl-size" }, "Размер: ", item.size),
+    item.brand && /*#__PURE__*/React.createElement("div", { className: "lbl-meta" }, "Бренд: ", item.brand),
+    /*#__PURE__*/React.createElement("div", { className: "lbl-meta" }, "ИП: Мукозобов Д.В."),
+    /*#__PURE__*/React.createElement("svg", { id: `barcode-${i}` }))));
 }
 function ArticleCombobox({
   value,
@@ -761,12 +770,20 @@ function SkladLedger() {
   const [wbBusy, setWbBusy] = useState(null);
   const [wbPromptFor, setWbPromptFor] = useState(null);
   const [wbNumber, setWbNumber] = useState('WB_');
+  // FBS: новые сборочные задания WB (Marketplace API через воркер).
+  const [fbsOrders, setFbsOrders] = useState([]);
+  const [fbsSyncedAt, setFbsSyncedAt] = useState(null);
+  const [fbsBusy, setFbsBusy] = useState(false);
+  const [fbsError, setFbsError] = useState('');
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
   const [syncError, setSyncError] = useState('');
   const [labelSelections, setLabelSelections] = useState({});
   const [printMode, setPrintMode] = useState(false);
+  const [printItems, setPrintItems] = useState([]); // этикетки для печати из браузера
+  const [printArticle, setPrintArticle] = useState(''); // артикул для «печати по размерам»
+  const [printQtys, setPrintQtys] = useState({}); // {размер: количество}
   const [uploadPreview, setUploadPreview] = useState(null);
   const [aktPreview, setAktPreview] = useState(null);
   const [aktTzId, setAktTzId] = useState(null); // ТЗ, из которого загружают акт (стадия «отгружено»)
@@ -1577,6 +1594,116 @@ function SkladLedger() {
     };
     reader.readAsArrayBuffer(file);
   }
+  // Единый рендер этикетки 58×40мм (PNG). Используется и для PDF, и для печати —
+  // чтобы этикетка везде была одинаковой.
+  async function renderLabelPNG(name, artCode, size, barcode, color, brand) {
+    const DPI = 300, LW_mm = 58, LH_mm = 40;
+    const LW_px = Math.round(LW_mm / 25.4 * DPI);
+    const LH_px = Math.round(LH_mm / 25.4 * DPI);
+    const MM = DPI / 25.4;
+    const mmToPx = mm => Math.round(mm * MM);
+    const cvs = document.createElement('canvas');
+    cvs.width = LW_px;
+    cvs.height = LH_px;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, LW_px, LH_px);
+    ctx.fillStyle = '#000000';
+    const ML = mmToPx(2.5);
+    const PT = DPI / 72;
+    const TEXT_START_Y = mmToPx(1.5);
+    const TEXT_END_Y = mmToPx(19.5);
+    const TEXT_H = TEXT_END_Y - TEXT_START_Y;
+    const rowDefs = [
+      { label: 'name', pt: 8.0 },
+      { label: 'art', pt: 6.5 },
+      { label: 'size', pt: 9.3 },
+      { label: 'color', pt: 6.0 },
+      { label: 'brand', pt: 6.0 },
+      { label: 'ip', pt: 6.0 },
+    ];
+    const textFor = lbl => {
+      if (lbl === 'name') return name || artCode;
+      if (lbl === 'art') return `Артикул: ${artCode}`;
+      if (lbl === 'size') return `Размер: ${size}`;
+      if (lbl === 'color') return color ? `Цвет: ${color}` : '';
+      if (lbl === 'brand') return brand ? `Бренд: ${brand}` : '';
+      if (lbl === 'ip') return 'ИП: Мукозобов Д.В.';
+      return '';
+    };
+    const rows = rowDefs.filter(r => textFor(r.label) !== '');
+    const rowH = pt => pt * PT;
+    const totalH = rows.reduce((s, r) => s + rowH(r.pt), 0);
+    const gap = rows.length > 1 ? (TEXT_H - totalH) / (rows.length - 1) : 0;
+    const maxW = LW_px - ML * 2;
+    let y = TEXT_START_Y;
+    for (const r of rows) {
+      let pt = r.pt;
+      let text = textFor(r.label);
+      ctx.font = `bold ${Math.round(pt * PT)}px Arial`;
+      while (ctx.measureText(text).width > maxW && pt > 4.5) {
+        pt -= 0.3;
+        ctx.font = `bold ${Math.round(pt * PT)}px Arial`;
+      }
+      if (ctx.measureText(text).width > maxW) {
+        while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1);
+        text += '…';
+      }
+      const textY = y + rowH(r.pt);
+      if (r.label === 'name') ctx.fillText(text, (LW_px - ctx.measureText(text).width) / 2, textY);else ctx.fillText(text, ML, textY);
+      y += rowH(r.pt) + gap;
+    }
+    const bcSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    bcSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    document.body.appendChild(bcSvg);
+    window.JsBarcode(bcSvg, barcode, {
+      format: 'CODE128', displayValue: false, width: 2.5, height: 80, margin: 0, background: '#ffffff', lineColor: '#000000'
+    });
+    const svgStr = new XMLSerializer().serializeToString(bcSvg);
+    document.body.removeChild(bcSvg);
+    const bcImg = new Image();
+    const blobUrl = URL.createObjectURL(new Blob([svgStr], { type: 'image/svg+xml' }));
+    await new Promise((res, rej) => { bcImg.onload = res; bcImg.onerror = rej; bcImg.src = blobUrl; });
+    URL.revokeObjectURL(blobUrl);
+    const bcW = LW_px - mmToPx(8);
+    const bcH = mmToPx(11.3);
+    const bcX = (LW_px - bcW) / 2;
+    const bcY = mmToPx(25);
+    ctx.drawImage(bcImg, bcX, bcY, bcW, bcH);
+    const numPx = Math.round(5.7 * PT);
+    ctx.font = `bold ${numPx}px Arial`;
+    const numW = ctx.measureText(barcode).width;
+    ctx.fillText(barcode, (LW_px - numW) / 2, mmToPx(38));
+    return cvs.toDataURL('image/png');
+  }
+  // Печать этикеток через диалог браузера: тот же PDF, что и при скачивании.
+  async function printLabels(items) {
+    if (!items || !items.length) { alert('Нечего печатать.'); return; }
+    setGeneratingLabels(true);
+    setLabelProgress('Готовлю печать…');
+    try {
+      const { jsPDF } = window.jspdf;
+      const LW_mm = 58, LH_mm = 40;
+      const doc = new jsPDF({ unit: 'mm', format: [LW_mm, LH_mm], orientation: 'landscape' });
+      let first = true;
+      for (const it of items) {
+        if (!first) doc.addPage([LW_mm, LH_mm], 'landscape');
+        first = false;
+        const img = await renderLabelPNG(it.name, it.article, it.size, it.barcode, '', it.brand);
+        doc.addImage(img, 'PNG', 0, 0, LW_mm, LH_mm);
+      }
+      doc.autoPrint();
+      const url = doc.output('bloburl');
+      const w = window.open(url, '_blank');
+      if (!w) alert('Разреши всплывающие окна для сайта, чтобы открыть печать.');
+    } catch (e) {
+      console.error(e);
+      alert('Ошибка печати: ' + (e.message || e));
+    } finally {
+      setGeneratingLabels(false);
+      setLabelProgress('');
+    }
+  }
   async function generateLabelPDFs(selectedItems, opts = {}) {
     const items = selectedItems || labelSelected;
     const selected = items.map(({
@@ -1847,6 +1974,95 @@ function SkladLedger() {
     const id = setInterval(maybeSync, 30 * 60 * 1000);
     return () => clearInterval(id);
   }, [loading, barcodesSyncedAt, syncingBarcodes]);
+  // Обратный индекс: баркод (EAN) → {код, размер, бренд} — из каталога WB.
+  const barcodeIndex = useMemo(() => {
+    const idx = {};
+    Object.keys(catalog).forEach(code => {
+      const c = catalog[code];
+      const cards = (c.cards && c.cards.length) ? c.cards : [{ brand: c.brand || '', sizes: c.sizes || {} }];
+      cards.forEach(card => {
+        Object.entries(card.sizes || {}).forEach(([size, bc]) => { if (bc) idx[String(bc)] = { code, size: String(size), brand: card.brand || '' }; });
+      });
+    });
+    return idx;
+  }, [catalog]);
+  // Синхронизация новых FBS-заказов через воркер (/fbs/orders/new).
+  async function syncFbsOrders() {
+    setFbsBusy(true);
+    setFbsError('');
+    try {
+      const res = await fetch(`${WB_PROXY_URL}/fbs/orders/new`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const orders = (data.orders || []).map(o => {
+        const sku = (o.skus || [])[0] || '';
+        const bx = barcodeIndex[sku] || null;
+        const code = bx ? bx.code : String(o.article || '').trim().split(/\s+/)[0];
+        return {
+          id: o.id, rid: o.rid, article: o.article || '', code,
+          barcode: sku, size: bx ? bx.size : '', brand: bx ? bx.brand : '',
+          nmId: o.nmId, chrtId: o.chrtId, createdAt: o.createdAt,
+          price: (o.convertedPrice || o.price || 0) / 100
+        };
+      });
+      setFbsOrders(orders);
+      setFbsSyncedAt(new Date().toISOString());
+    } catch (e) {
+      console.error(e);
+      setFbsError('Не удалось получить заказы: ' + (e.message || e));
+    } finally {
+      setFbsBusy(false);
+    }
+  }
+  // Лист подбора: группируем заказы по коду+размеру+бренду, считаем количество.
+  const fbsPickList = useMemo(() => {
+    const map = {};
+    fbsOrders.forEach(o => {
+      const key = `${o.code}|||${o.size}|||${o.brand}`;
+      if (!map[key]) map[key] = { code: o.code, size: o.size, brand: o.brand, article: o.article, qty: 0 };
+      map[key].qty += 1;
+    });
+    return Object.values(map).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }) || (Number(a.size) || 0) - (Number(b.size) || 0));
+  }, [fbsOrders]);
+  // Печать стикеров FBS: тянем стикеры WB пачками ≤100, собираем в PDF, печатаем.
+  async function printFbsStickers(orders) {
+    const ids = (orders || []).map(o => o.id).filter(Boolean);
+    if (!ids.length) { alert('Нет заказов для печати стикеров.'); return; }
+    setFbsBusy(true);
+    setFbsError('');
+    try {
+      const { jsPDF } = window.jspdf;
+      const LW_mm = 58, LH_mm = 40;
+      const doc = new jsPDF({ unit: 'mm', format: [LW_mm, LH_mm], orientation: 'landscape' });
+      let first = true;
+      for (let i = 0; i < ids.length; i += 100) {
+        const batch = ids.slice(i, i + 100);
+        const res = await fetch(`${WB_PROXY_URL}/fbs/stickers?type=png&width=58&height=40`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orders: batch })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        for (const st of (data.stickers || [])) {
+          const b64 = st.file || st.png || st.image || '';
+          if (!b64) continue;
+          const src = String(b64).startsWith('data:') ? b64 : `data:image/png;base64,${b64}`;
+          if (!first) doc.addPage([LW_mm, LH_mm], 'landscape');
+          first = false;
+          doc.addImage(src, 'PNG', 0, 0, LW_mm, LH_mm);
+        }
+      }
+      if (first) { alert('WB не вернул стикеры (проверь заказы/токен «Маркетплейс»).'); return; }
+      doc.autoPrint();
+      const url = doc.output('bloburl');
+      const w = window.open(url, '_blank');
+      if (!w) alert('Разреши всплывающие окна для сайта, чтобы открыть печать.');
+    } catch (e) {
+      console.error(e);
+      setFbsError('Ошибка печати стикеров: ' + (e.message || e));
+    } finally {
+      setFbsBusy(false);
+    }
+  }
   function toggleLabelSelection(article, size) {
     const key = `${article}__${size}`;
     setLabelSelections(prev => {
@@ -1881,6 +2097,44 @@ function SkladLedger() {
       }
     });
     return items;
+  }
+  // Печать по размерам: строим этикетки из заданного количества на каждый размер.
+  function startPrintBySize() {
+    const data = labelArticles[printArticle];
+    if (!data) { alert('Сначала выбери артикул.'); return; }
+    const items = [];
+    [...data.sizes].sort((a, b) => a.size - b.size).forEach(s => {
+      const q = Math.max(0, Number(printQtys[String(s.size)]) || 0);
+      for (let i = 0; i < q; i++) items.push({ article: data.code, size: String(s.size), barcode: s.barcode, name: data.name, brand: data.brand });
+    });
+    if (!items.length) { alert('Укажи количество хотя бы для одного размера.'); return; }
+    printLabels(items);
+  }
+  // Этикетки из выбранных артикулов×коробов (по сетке, иначе по остатку) — для печати.
+  function buildBoxItems() {
+    const items = [];
+    labelSelected.forEach(({ artStr, boxes }) => {
+      const data = labelArticles[artStr];
+      if (!data || !(boxes > 0)) return;
+      const gv = gridVector(artStr);
+      let count;
+      if (gv) count = s => (gv[String(s.size)] || 0) * boxes;
+      else {
+        const tot = data.sizes.reduce((a, x) => a + x.qty, 0);
+        if (!tot) return;
+        const ref = tot / 8;
+        count = s => Math.round(s.qty / ref * boxes);
+      }
+      [...data.sizes].sort((a, b) => a.size - b.size).forEach(s => {
+        for (let i = 0, c = count(s); i < c; i++) items.push({ article: data.code, size: String(s.size), barcode: s.barcode, name: data.name, brand: data.brand });
+      });
+    });
+    return items;
+  }
+  function startPrintSelected() {
+    const items = buildBoxItems();
+    if (!items.length) { alert('Нечего печатать — задай короба или размерную сетку.'); return; }
+    printLabels(items);
   }
   async function resetAllData() {
     if (!window.confirm('ВНИМАНИЕ: удалить АБСОЛЮТНО ВСЕ данные (приходы, отгрузки, брак, фотостудия, неопознанное, журнал действий, заявки ТЗ, склады, резервные копии)?\nЭто для тестирования и НЕОБРАТИМО.')) return;
@@ -2807,6 +3061,7 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("path", { key: 2, d: "M14 9h4l3 3v5a1 1 0 0 1-1 1h-1" }),
       /*#__PURE__*/React.createElement("circle", { key: 3, cx: 7, cy: 18, r: 2 }),
       /*#__PURE__*/React.createElement("circle", { key: 4, cx: 17, cy: 18, r: 2 }) ]) },
+    ...(role === 'fulfillment' ? [{ key: 'fbs', label: 'FBS · сборка', icon: /*#__PURE__*/React.createElement(Printer, { size: 17 }) }] : []),
     { key: 'tz', label: 'ТЗ на отгрузку', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 17 }) },
     ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }] : []),
     { key: 'reports', label: 'Отчёты', icon: svgIcon([
@@ -2890,6 +3145,31 @@ function SkladLedger() {
         type: "file", accept: "image/*", capture: "environment", multiple: true, style: { display: 'none' },
         onChange: e => setFiles(Array.from(e.target.files || []))
       })));
+  const fbsContent = /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement(Section, { title: "Сборочные задания FBS", icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsBusy, onClick: syncFbsOrders },
+          /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), fbsBusy ? " Загружаю…" : " Обновить заказы"),
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsBusy || fbsOrders.length === 0, onClick: () => printFbsStickers(fbsOrders) },
+          /*#__PURE__*/React.createElement(Printer, { size: 14 }), ` Печать стикеров (${fbsOrders.length})`),
+        /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
+          fbsSyncedAt ? `Заказов: ${fbsOrders.length} · обновлено ${new Date(fbsSyncedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}` : 'Нажми «Обновить заказы»')),
+      fbsError && /*#__PURE__*/React.createElement("div", { style: { color: 'var(--negative)', fontSize: 13, marginBottom: 10 } }, fbsError),
+      /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)' } }, "Порядок сборки: отсканируй EAN товара → Честный Знак → печатается стикер FBS. (Станция сканирования — следующим шагом.)")),
+    /*#__PURE__*/React.createElement(Section, { title: `Лист подбора (${fbsPickList.reduce((s, r) => s + r.qty, 0)} шт.)`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
+      fbsPickList.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Заказов нет. Обнови список выше.")
+        : /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto' } }, /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
+            /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left', borderBottom: '1px solid var(--line)' } },
+              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 } }, "Артикул"),
+              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 } }, "Бренд"),
+              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 } }, "Размер"),
+              /*#__PURE__*/React.createElement("th", { style: { padding: '6px 10px', fontWeight: 500 }, className: "skl-mono" }, "Собрать, шт."))),
+            /*#__PURE__*/React.createElement("tbody", null, fbsPickList.map((r, i) => /*#__PURE__*/React.createElement("tr", { key: i, style: { borderTop: '1px solid var(--line)' } },
+              /*#__PURE__*/React.createElement("td", { className: "skl-mono", style: { padding: '7px 10px', fontWeight: 700, color: 'var(--accent)' } }, r.code),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, r.brand || '—'),
+              /*#__PURE__*/React.createElement("td", { className: "skl-mono", style: { padding: '7px 10px' } }, r.size || '—'),
+              /*#__PURE__*/React.createElement("td", { className: "skl-mono", style: { padding: '7px 10px', fontWeight: 700 } }, r.qty))))))));
   const receivingContent = /*#__PURE__*/React.createElement(React.Fragment, null,
     role === 'fulfillment' && /*#__PURE__*/React.createElement(Section, { title: "Новая приёмка машины", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 } },
@@ -3131,20 +3411,21 @@ function SkladLedger() {
 
         .skl-label-sheet { display: none; }
         @media print {
+          @page { size: 58mm 40mm; margin: 0; }
           body * { visibility: hidden; }
           .skl-label-sheet, .skl-label-sheet * { visibility: visible; }
-          .skl-label-sheet {
-            display: grid !important; position: absolute; left: 0; top: 0; width: 100%;
-            grid-template-columns: repeat(2, 1fr); gap: 2mm; padding: 4mm;
-          }
+          .skl-label-sheet { display: block !important; position: absolute; left: 0; top: 0; }
           .skl-label {
-            border: 1px dashed #999; border-radius: 2mm; padding: 2mm 3mm;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            text-align: center; break-inside: avoid; height: 28mm; box-sizing: border-box;
+            width: 58mm; height: 40mm; box-sizing: border-box; padding: 1.5mm 2mm 1mm;
+            display: flex; flex-direction: column; align-items: center; text-align: center;
+            break-inside: avoid; page-break-after: always; overflow: hidden;
+            color: #000; background: #fff; font-family: Arial, sans-serif;
           }
-          .skl-label svg { width: 100%; height: 14mm; }
-          .skl-label .lbl-article { font-size: 12px; font-weight: 700; font-family: Arial, sans-serif; }
-          .skl-label .lbl-meta { font-size: 10px; color: #333; font-family: Arial, sans-serif; }
+          .skl-label .lbl-name { font-size: 8pt; font-weight: 700; line-height: 1.05; }
+          .skl-label .lbl-article { font-size: 6.5pt; }
+          .skl-label .lbl-size { font-size: 9pt; font-weight: 700; margin: 0.3mm 0; }
+          .skl-label .lbl-meta { font-size: 6pt; color: #000; }
+          .skl-label svg { width: 52mm; height: 13mm; margin-top: auto; }
         }
       `), !role ? /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3294,7 +3575,7 @@ function SkladLedger() {
     /*#__PURE__*/React.createElement("polyline", { key: 2, points: "16 17 21 12 16 7" }),
     /*#__PURE__*/React.createElement("line", { key: 3, x1: 21, y1: 12, x2: 9, y2: 12 })
   ])))), printMode && /*#__PURE__*/React.createElement(LabelPrintView, {
-    items: labelItems()
+    items: printItems
   }), /*#__PURE__*/React.createElement("div", {
     className: "skl-topbar"
   }, /*#__PURE__*/React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 } }, /*#__PURE__*/React.createElement("button", {
@@ -3481,7 +3762,11 @@ function SkladLedger() {
     icon: /*#__PURE__*/React.createElement(Clock, {
       size: 16
     })
-  }, {
+  }, ...(role === 'fulfillment' ? [{
+    key: 'fbs',
+    label: 'FBS · сборка',
+    icon: /*#__PURE__*/React.createElement(Printer, { size: 16 })
+  }] : []), {
     key: 'tz',
     label: 'ТЗ на отгрузку',
     icon: /*#__PURE__*/React.createElement(ClipboardList, {
@@ -4635,7 +4920,11 @@ function SkladLedger() {
     }
   }), " Генерирую…") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Download, {
     size: 14
-  }), " Скачать PDF (", labelSelected.length, " арт.)")), generatingLabels && /*#__PURE__*/React.createElement("span", {
+  }), " Скачать PDF (", labelSelected.length, " арт.)")), /*#__PURE__*/React.createElement("button", {
+    className: "skl-btn skl-btn-ghost",
+    disabled: labelSelected.length === 0,
+    onClick: startPrintSelected
+  }, /*#__PURE__*/React.createElement(Printer, { size: 14 }), " Печать"), generatingLabels && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
       color: 'var(--ink-soft)'
@@ -4645,7 +4934,45 @@ function SkladLedger() {
       fontSize: 12,
       color: 'var(--positive)'
     }
-  }, labelProgress))))), activeTab === 'reports' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
+  }, labelProgress)))), /*#__PURE__*/React.createElement(Section, {
+    title: "Печать по размерам",
+    icon: /*#__PURE__*/React.createElement(Printer, { size: 18 }),
+    open: true,
+    collapsible: false
+  }, /*#__PURE__*/React.createElement("p", {
+    style: { fontSize: 13, color: 'var(--ink-soft)', marginTop: 0, marginBottom: 12 }
+  }, "Выбери артикул и укажи, сколько этикеток печатать на каждый размер. «Печать» откроет диалог печати браузера — без скачивания файла."),
+    /*#__PURE__*/React.createElement(ArticleCombobox, {
+      value: printArticle,
+      onChange: v => { setPrintArticle(v); setPrintQtys({}); },
+      options: Object.keys(labelArticles),
+      names: Object.fromEntries(Object.entries(labelArticles).map(([k, v]) => [k, v.name])),
+      subtitle: a => (labelArticles[a] && labelArticles[a].brand) || '',
+      placeholder: "Начни вводить артикул или название…"
+    }), printArticle && labelArticles[printArticle] && /*#__PURE__*/React.createElement("div", {
+      style: { marginTop: 14 }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }
+    }, [...labelArticles[printArticle].sizes].sort((a, b) => a.size - b.size).map(s => /*#__PURE__*/React.createElement("div", {
+      key: s.size,
+      style: { display: 'flex', flexDirection: 'column', gap: 4, width: 84 }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: 'var(--ink-soft)' }
+    }, "Размер ", String(s.size)), /*#__PURE__*/React.createElement("input", {
+      className: "skl-input",
+      type: "number",
+      min: "0",
+      value: printQtys[String(s.size)] || '',
+      placeholder: "0",
+      onChange: e => setPrintQtys(prev => _objectSpread(_objectSpread({}, prev), {}, { [String(s.size)]: e.target.value }))
+    })))), /*#__PURE__*/React.createElement("div", {
+      style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }
+    }, /*#__PURE__*/React.createElement("button", {
+      className: "skl-btn skl-btn-primary",
+      onClick: startPrintBySize
+    }, /*#__PURE__*/React.createElement(Printer, { size: 14 }), " Печать"), /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 12, color: 'var(--ink-soft)' }
+    }, "Итого: ", [...labelArticles[printArticle].sizes].reduce((t, s) => t + (Number(printQtys[String(s.size)]) || 0), 0), " шт."))))), activeTab === 'reports' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
     title: "Брак по артикулам и размерам",
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
       size: 18,
@@ -5202,7 +5529,7 @@ function SkladLedger() {
     className: "skl-btn skl-btn-ghost",
     disabled: restoring,
     onClick: () => restoreBackup(b.key)
-  }, "Восстановить")))))))), activeTab === 'receiving' && receivingContent, activeTab === 'main' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
+  }, "Восстановить")))))))), activeTab === 'receiving' && receivingContent, activeTab === 'fbs' && fbsContent, activeTab === 'main' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
     title: "Остатки по артикулам",
     icon: /*#__PURE__*/React.createElement(Box, {
       size: 18
