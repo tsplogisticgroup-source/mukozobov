@@ -23,7 +23,7 @@ export default async function routes(app) {
               SUM(piece_amount)                             AS piece_amount,
               SUM(total_amount)                             AS total_amount
        FROM v_shift_pay
-       WHERE work_date >= $1::date AND work_date < ($1::date + interval '1 month')
+       WHERE shift_closed AND work_date >= $1::date AND work_date < ($1::date + interval '1 month')
        GROUP BY employee_id, employee_name, role
        ORDER BY total_amount DESC`,
       [from],
@@ -32,7 +32,7 @@ export default async function routes(app) {
     const byRole = await all(
       `SELECT role, kind, COUNT(*) AS shifts_count, SUM(total_amount) AS total_amount
        FROM v_shift_pay
-       WHERE work_date >= $1::date AND work_date < ($1::date + interval '1 month')
+       WHERE shift_closed AND work_date >= $1::date AND work_date < ($1::date + interval '1 month')
        GROUP BY role, kind ORDER BY role, kind`,
       [from],
     );
@@ -40,7 +40,7 @@ export default async function routes(app) {
     const byDay = await all(
       `SELECT work_date, kind, COUNT(*) AS people, SUM(total_amount) AS total_amount
        FROM v_shift_pay
-       WHERE work_date >= $1::date AND work_date < ($1::date + interval '1 month')
+       WHERE shift_closed AND work_date >= $1::date AND work_date < ($1::date + interval '1 month')
        GROUP BY work_date, kind ORDER BY work_date, kind`,
       [from],
     );
@@ -114,7 +114,7 @@ export default async function routes(app) {
               SUM(shift_amount) AS shift_amount, SUM(piece_amount) AS piece_amount,
               SUM(total_amount) AS total_amount
        FROM v_shift_pay
-       WHERE work_date >= $1::date AND work_date < ($1::date + interval '1 month')
+       WHERE shift_closed AND work_date >= $1::date AND work_date < ($1::date + interval '1 month')
        GROUP BY employee_name, role ORDER BY employee_name`,
       [from],
     );

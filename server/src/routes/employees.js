@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { createWriteStream } from 'node:fs';
-import { all, one } from '../db.js';
+import { all, one, q } from '../db.js';
 import { requireRole } from '../auth.js';
 import { UPLOAD_DIR } from '../config.js';
 import { normPhone } from './auth.js';
@@ -100,6 +100,29 @@ export default async function routes(app) {
     );
     if (!emp) return reply.code(404).send({ error: 'Сотрудник не найден' });
     return emp;
+  });
+
+  // Полное удаление вместе со сменами, выработкой, выплатами и штрафами.
+  // Обычно достаточно заблокировать — тогда история расчётов остаётся.
+  app.delete('/:id', { preHandler: [requireRole('admin')] }, async (req, reply) => {
+    if (req.params.id === req.emp.id) {
+      return reply.code(400).send({ error: 'Нельзя удалить самого себя' });
+    }
+    const emp = await one('SELECT id, role FROM employees WHERE id = $1', [req.params.id]);
+    if (!emp) return reply.code(404).send({ error: 'Сотрудник не найден' });
+
+    // последний руководитель должен остаться, иначе в систему будет не войти
+    if (emp.role === 'admin') {
+      const others = await one(
+        `SELECT count(*)::int AS n FROM employees
+         WHERE role = 'admin' AND status = 'active' AND id <> $1`, [req.params.id]);
+      if (!others.n) {
+        return reply.code(400).send({ error: 'Это последний руководитель — удалять нельзя' });
+      }
+    }
+
+    await q('DELETE FROM employees WHERE id = $1', [req.params.id]);
+    return { ok: true };
   });
 
   // Персональная ставка: перебивает типовую по роли.

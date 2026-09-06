@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
-import { initials, money, todayISO, ROLE_NAME, longDate } from '../lib/format.js';
+import { initials, money, todayISO, plural, ROLE_NAME, KIND_NAME, longDate } from '../lib/format.js';
 
 const METHOD = { cash: 'Наличными', card: 'На карту', account: 'На счёт' };
 
@@ -72,6 +72,44 @@ function EmployeeSheet({ employeeId, onClose, onChanged }) {
             <div className="kpi__label">{Number(b.balance) < 0 ? 'Переплата' : 'К выплате'}</div>
             <div className="kpi__value">{money(Math.abs(b.balance))} ₽</div>
           </div>
+        </div>
+
+        {Number(b.pending) > 0 && (
+          <div className="alert alert--warn">
+            Ещё {money(b.pending)} ₽ за {b.pending_count}{' '}
+            {plural(Number(b.pending_count), 'смену', 'смены', 'смен')} не в счёт —
+            эти смены пока не закрыты.
+          </div>
+        )}
+
+        <div className="section">За что начислено</div>
+        <div className="card scroll-x">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Смена</th>
+                <th className="n">Ставка</th>
+                <th className="n">Сдельно</th>
+                <th className="n">Итого</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!data.earnings.length && (
+                <tr><td colSpan="4" className="muted">Отработанных смен пока нет.</td></tr>
+              )}
+              {data.earnings.map((r) => (
+                <tr key={r.signup_id} style={r.shift_closed ? undefined : { opacity: 0.55 }}>
+                  <td>
+                    {longDate(r.work_date)} · {KIND_NAME[r.kind].toLowerCase()}
+                    {!r.shift_closed && <div className="small muted">смена не закрыта</div>}
+                  </td>
+                  <td className="n">{money(r.shift_amount)}</td>
+                  <td className="n">{money(r.piece_amount)}</td>
+                  <td className="n"><b>{money(r.total_amount)}</b></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         <div className="section">Выплатить</div>
@@ -244,10 +282,20 @@ export default function PaymentsPage() {
           <div className="kpi__value">{money(data.totals.paid)} ₽</div>
         </div>
         <div className="kpi">
-          <div className="kpi__label">Удержано штрафами</div>
-          <div className="kpi__value">{money(data.totals.penalty)} ₽</div>
+          <div className="kpi__label">Ждёт закрытия смен</div>
+          <div className="kpi__value">{money(data.totals.pending)} ₽</div>
+          <div className="kpi__hint">пока не в долге</div>
         </div>
       </div>
+
+      {data.totals.pending > 0 && (
+        <div className="card card--flat">
+          <div className="small muted">
+            Деньги попадают в долг только после того, как смена закрыта. Отработали —
+            зайдите в «График», откройте смену и нажмите «Смена отработана — закрыть».
+          </div>
+        </div>
+      )}
 
       <div className="section">Ждут оплаты · {debtors.length}</div>
       <div className="card">

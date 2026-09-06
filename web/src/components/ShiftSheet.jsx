@@ -162,6 +162,17 @@ export default function ShiftSheet({ shift, onClose, onChanged }) {
                         Не вышел
                       </button>
                     )}
+                    <button
+                      className="btn btn--sm btn--ghost"
+                      disabled={busy}
+                      title="Убрать из смены совсем"
+                      onClick={() => {
+                        if (!confirm(`Убрать ${s.last_name} ${s.first_name} из смены? Его выработка за эту смену тоже удалится.`)) return;
+                        act(() => api.del(`/api/shifts/${shift.id}/signups/${s.id}`));
+                      }}
+                    >
+                      Убрать
+                    </button>
                   </div>
                 </div>
               ))}
@@ -227,12 +238,17 @@ export default function ShiftSheet({ shift, onClose, onChanged }) {
                 Сохранить
               </button>
               <button
-                className="btn btn--ghost btn--wide"
+                className={shift.closed ? 'btn btn--ghost btn--wide' : 'btn btn--wide'}
                 disabled={busy}
                 onClick={() => act(() => api.patch(`/api/shifts/${shift.id}`, { closed: !shift.closed }))}
               >
-                {shift.closed ? 'Открыть смену' : 'Закрыть смену'}
+                {shift.closed ? 'Открыть смену заново' : 'Смена отработана — закрыть'}
               </button>
+              <div className="small muted">
+                {shift.closed
+                  ? 'Смена закрыта: оплата за неё начислена, изменить состав и выработку уже нельзя.'
+                  : 'Пока смена не закрыта, деньги за неё не начисляются. Закрывайте, когда люди отработали и внесли выработку.'}
+              </div>
             </div>
           </>
         )}

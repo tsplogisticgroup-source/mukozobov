@@ -138,6 +138,23 @@ export default function CrewPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Удаление стирает и расчёты, поэтому спрашиваем и подсказываем про блокировку.
+  async function remove(emp) {
+    const ok = confirm(
+      `Удалить ${fullName(emp)} полностью?\n\n`
+      + 'Вместе с ним удалятся все его смены, выработка, выплаты и штрафы. '
+      + 'Отменить это будет нельзя.\n\n'
+      + 'Если человек просто уволился — лучше «Заблокировать»: история расчётов сохранится.',
+    );
+    if (!ok) return;
+    try {
+      await api.del(`/api/employees/${emp.id}`);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function change(emp, patch) {
     try {
       await api.patch(`/api/employees/${emp.id}`, patch);
@@ -189,12 +206,17 @@ export default function CrewPage() {
         {active.map((emp) => (
           <PersonRow key={emp.id} emp={emp} can={can} onChange={change} onRates={setRatesFor}>
             {can.manageCrew && emp.id !== me.id && (
-              <button
-                className="btn btn--sm btn--ghost"
-                onClick={() => change(emp, { status: 'blocked' })}
-              >
-                Заблокировать
-              </button>
+              <>
+                <button
+                  className="btn btn--sm btn--ghost"
+                  onClick={() => change(emp, { status: 'blocked' })}
+                >
+                  Заблокировать
+                </button>
+                <button className="btn btn--sm btn--danger" onClick={() => remove(emp)}>
+                  Удалить
+                </button>
+              </>
             )}
           </PersonRow>
         ))}
@@ -207,10 +229,15 @@ export default function CrewPage() {
             {blocked.map((emp) => (
               <PersonRow key={emp.id} emp={emp} can={can} onChange={change} onRates={setRatesFor}>
                 {can.manageCrew && (
-                  <button className="btn btn--sm btn--ghost"
-                    onClick={() => change(emp, { status: 'active' })}>
-                    Вернуть в штат
-                  </button>
+                  <>
+                    <button className="btn btn--sm btn--ghost"
+                      onClick={() => change(emp, { status: 'active' })}>
+                      Вернуть в штат
+                    </button>
+                    <button className="btn btn--sm btn--danger" onClick={() => remove(emp)}>
+                      Удалить
+                    </button>
+                  </>
                 )}
               </PersonRow>
             ))}

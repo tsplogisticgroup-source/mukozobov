@@ -128,7 +128,7 @@ export default function MyShiftsPage() {
           <div className="kpi__hint">начислено {money(stats.pay)} ₽</div>
         </div>
         <div className="kpi">
-          <div className="kpi__label">Заработано всего</div>
+          <div className="kpi__label">Заработано</div>
           <div className="kpi__value">{money(account?.balance?.earned || 0)} ₽</div>
           {Number(account?.balance?.penalty) > 0 && (
             <div className="kpi__hint">штрафы −{money(account.balance.penalty)} ₽</div>
@@ -145,6 +145,14 @@ export default function MyShiftsPage() {
           <div className="kpi__value">{money(Math.abs(account?.balance?.balance || 0))} ₽</div>
         </div>
       </div>
+
+      {Number(account?.balance?.pending) > 0 && (
+        <div className="alert alert--warn">
+          Ещё {money(account.balance.pending)} ₽ за {account.balance.pending_count}{' '}
+          {plural(Number(account.balance.pending_count), 'смену', 'смены', 'смен')} —
+          деньги начислятся, когда старший закроет смену.
+        </div>
+      )}
 
       {account && (account.payments.length > 0 || account.penalties.length > 0) && (
         <>
@@ -202,6 +210,7 @@ export default function MyShiftsPage() {
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div className="num" style={{ fontSize: 18 }}>{money(r.pay)} ₽</div>
+                <div className="small muted">{r.closed ? 'начислено' : 'ждёт закрытия'}</div>
               </div>
             </div>
 

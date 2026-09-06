@@ -148,6 +148,16 @@ export default async function routes(app) {
     return row;
   });
 
+  // Убрать человека из смены совсем: запись и его выработка за эту смену удаляются.
+  app.delete('/:id/signups/:signupId', { preHandler: [requireRole('senior')] }, async (req, reply) => {
+    const row = await one(
+      'DELETE FROM shift_signups WHERE id = $1 AND shift_id = $2 RETURNING id',
+      [req.params.signupId, req.params.id],
+    );
+    if (!row) return reply.code(404).send({ error: 'Запись не найдена' });
+    return { ok: true };
+  });
+
   // Мои смены: личный календарь и форма выработки берут данные отсюда.
   app.get('/my/list', async (req) => all(
     `SELECT su.id AS signup_id, su.status, s.id AS shift_id, s.work_date, s.kind, s.closed,

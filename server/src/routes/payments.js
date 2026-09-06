@@ -5,10 +5,19 @@ import { requireRole } from '../auth.js';
 export default async function routes(app) {
   app.addHook('preHandler', app.authenticate);
 
+  // За что начислены деньги: список смен с датой, видом и суммой.
+  const earningsOf = (employeeId) => all(
+    `SELECT signup_id, work_date, kind, shift_amount, piece_amount, total_amount, shift_closed
+     FROM v_shift_pay WHERE employee_id = $1
+     ORDER BY work_date DESC, kind LIMIT 200`,
+    [employeeId],
+  );
+
   // Мой лицевой счёт: начислено, удержано, выплачено, остаток — и вся история.
   app.get('/me', async (req) => {
     const balance = await one(
       'SELECT * FROM v_employee_balance WHERE employee_id = $1', [req.emp.id]);
+    const earnings = await earningsOf(req.emp.id);
     const payments = await all(
       `SELECT id, amount, paid_on, method, comment FROM payments
        WHERE employee_id = $1 ORDER BY paid_on DESC, created_at DESC LIMIT 100`,
@@ -17,21 +26,23 @@ export default async function routes(app) {
       `SELECT id, amount, reason, penalty_on FROM penalties
        WHERE employee_id = $1 ORDER BY penalty_on DESC, created_at DESC LIMIT 100`,
       [req.emp.id]);
-    return { balance, payments, penalties };
+    return { balance, earnings, payments, penalties };
   });
 
   // Кому и сколько должны — главный экран раздела «Выплаты».
   app.get('/debts', { preHandler: [requireRole('admin')] }, async () => {
     const rows = await all(
       `SELECT * FROM v_employee_balance
-       WHERE status <> 'pending' AND (earned > 0 OR paid > 0 OR penalty > 0)
+       WHERE status <> 'pending'
+         AND (earned > 0 OR paid > 0 OR penalty > 0 OR pending > 0)
        ORDER BY balance DESC, employee_name`);
     const totals = rows.reduce((acc, r) => ({
       earned: acc.earned + Number(r.earned),
       penalty: acc.penalty + Number(r.penalty),
       paid: acc.paid + Number(r.paid),
       balance: acc.balance + Number(r.balance),
-    }), { earned: 0, penalty: 0, paid: 0, balance: 0 });
+      pending: acc.pending + Number(r.pending),
+    }), { earned: 0, penalty: 0, paid: 0, balance: 0, pending: 0 });
     return { rows, totals };
   });
 
@@ -52,7 +63,8 @@ export default async function routes(app) {
        FROM penalties f LEFT JOIN employees a ON a.id = f.created_by
        WHERE f.employee_id = $1 ORDER BY f.penalty_on DESC, f.created_at DESC`,
       [req.params.id]);
-    return { balance, payments, penalties };
+    const earnings = await earningsOf(req.params.id);
+    return { balance, earnings, payments, penalties };
   });
 
   // ------------------------------------------------------------------ выплаты
