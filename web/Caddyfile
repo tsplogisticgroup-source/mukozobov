@@ -1,0 +1,21 @@
+# SITE_ADDRESS задаётся в .env: локально ":80", на сервере — домен (тогда HTTPS
+# выпускается автоматически).
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# API и фотографии сотрудников отдаёт node-контейнер
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle /uploads/* {
+		reverse_proxy api:3000
+	}
+
+	# всё остальное — собранный фронт; неизвестные пути отдаём index.html,
+	# иначе прямой заход на /shifts вернёт 404
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

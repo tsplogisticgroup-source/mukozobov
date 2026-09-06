@@ -1,0 +1,65 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smena}
+      POSTGRES_USER: ${POSTGRES_USER:-smena}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smena}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      # скрипты выполняются один раз — при создании пустого тома
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # только с самой машины: снаружи база доступна быть не должна
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-smena}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-smena}:${POSTGRES_PASSWORD:-smena}@db:5432/${POSTGRES_DB:-smena}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      ADMIN_PHONE: ${ADMIN_PHONE:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_LAST_NAME: ${ADMIN_LAST_NAME:-}
+      ADMIN_FIRST_NAME: ${ADMIN_FIRST_NAME:-}
+      PORT: 3000
+    volumes:
+      # фотографии сотрудников переживают пересборку контейнера
+      - uploads:/app/uploads
+    ports:
+      # наружу API отдаёт только Caddy — напрямую он не нужен
+      - "127.0.0.1:${API_PORT:-3000}:3000"
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # локально ":80", на сервере — домен, тогда Caddy сам получит сертификат
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    ports:
+      - "${WEB_PORT:-8080}:80"
+      - "${WEB_TLS_PORT:-8443}:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  db_data:
+  uploads:
+  caddy_data:
+  caddy_config:
