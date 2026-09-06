@@ -11,6 +11,7 @@ export default function ProfilePage() {
     first_name: me.first_name || '',
     middle_name: me.middle_name || '',
     birth_date: me.birth_date ? String(me.birth_date).slice(0, 10) : '',
+    phone: phoneView(me.phone),
   });
   const [pwd, setPwd] = useState({ current: '', next: '' });
   const [msg, setMsg] = useState('');
@@ -25,8 +26,13 @@ export default function ProfilePage() {
     setError('');
     setMsg('');
     try {
-      setMe(await api.patch('/api/employees/me', form));
-      setMsg('Данные сохранены.');
+      const saved = await api.patch('/api/employees/me', form);
+      const phoneChanged = saved.phone !== me.phone;
+      setMe(saved);
+      setForm({ ...form, phone: phoneView(saved.phone) });
+      setMsg(phoneChanged
+        ? `Сохранено. Входить теперь по номеру ${phoneView(saved.phone)}.`
+        : 'Данные сохранены.');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -106,6 +112,12 @@ export default function ProfilePage() {
           <span>Дата рождения</span>
           <input type="date" value={form.birth_date}
             onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
+        </label>
+        <label className="field">
+          <span>Телефон — это ваш логин</span>
+          <input type="tel" inputMode="tel" value={form.phone} required
+            placeholder="+7 999 123-45-67"
+            onChange={(e) => setForm({ ...form, phone: e.target.value })} />
         </label>
         <button className="btn btn--accent btn--wide" disabled={busy}>Сохранить</button>
       </form>

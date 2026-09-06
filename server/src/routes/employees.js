@@ -6,6 +6,7 @@ import { createWriteStream } from 'node:fs';
 import { all, one } from '../db.js';
 import { requireRole } from '../auth.js';
 import { UPLOAD_DIR } from '../config.js';
+import { normPhone } from './auth.js';
 
 const fields = `id, phone, last_name, first_name, middle_name, birth_date,
                 photo_path, role, status, note, created_at`;
@@ -31,15 +32,29 @@ export default async function routes(app) {
     if (b.last_name !== undefined && !String(b.last_name).trim()) {
       return reply.code(400).send({ error: 'Фамилия не может быть пустой' });
     }
+
+    // Телефон — это логин, поэтому он должен остаться уникальным.
+    let phone = null;
+    if (b.phone !== undefined && b.phone !== null && String(b.phone).trim() !== '') {
+      phone = normPhone(b.phone);
+      if (phone.length !== 11) {
+        return reply.code(400).send({ error: 'Укажите телефон в формате +7 999 123-45-67' });
+      }
+      const taken = await one('SELECT id FROM employees WHERE phone = $1 AND id <> $2',
+        [phone, req.emp.id]);
+      if (taken) return reply.code(409).send({ error: 'Этот телефон уже занят другим сотрудником' });
+    }
+
     return one(
       `UPDATE employees SET
          last_name   = COALESCE($2, last_name),
          first_name  = COALESCE($3, first_name),
          middle_name = COALESCE($4, middle_name),
-         birth_date  = COALESCE($5, birth_date)
+         birth_date  = COALESCE($5, birth_date),
+         phone       = COALESCE($6, phone)
        WHERE id = $1 RETURNING ${fields}`,
       [req.emp.id, b.last_name?.trim(), b.first_name?.trim(),
-       b.middle_name?.trim(), b.birth_date || null],
+       b.middle_name?.trim(), b.birth_date || null, phone],
     );
   });
 
