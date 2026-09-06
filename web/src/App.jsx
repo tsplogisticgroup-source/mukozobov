@@ -11,6 +11,7 @@ import MyShiftsPage from './pages/MyShiftsPage.jsx';
 import CrewPage from './pages/CrewPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
 import RatesPage from './pages/RatesPage.jsx';
+import PaymentsPage from './pages/PaymentsPage.jsx';
 import ProfilePage from './pages/ProfilePage.jsx';
 
 // Один список разделов на обе раскладки: боковое меню на ПК и вкладки на телефоне.
@@ -21,6 +22,7 @@ function useMenu() {
     { to: '/my', label: 'Мои смены' },
     ...(can.manageShifts ? [{ to: '/crew', label: 'Люди' }] : []),
     ...(can.manageShifts ? [{ to: '/reports', label: 'Отчёты' }] : []),
+    ...(can.seeMoney ? [{ to: '/payments', label: 'Выплаты' }] : []),
     ...(can.seeMoney ? [{ to: '/rates', label: 'Ставки' }] : []),
   ];
 }
@@ -114,6 +116,7 @@ export default function App() {
         <Route path="/my" element={<MyShiftsPage />} />
         <Route path="/crew" element={<CrewPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/rates" element={<RatesPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

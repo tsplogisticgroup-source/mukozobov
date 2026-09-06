@@ -88,13 +88,17 @@ export default function MyShiftsPage() {
   const [openId, setOpenId] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const [account, setAccount] = useState(null);
+
   const load = useCallback(async () => {
-    const [list, piece] = await Promise.all([
+    const [list, piece, money_] = await Promise.all([
       api.get('/api/shifts/my/list'),
       api.get('/api/rates/piece'),
+      api.get('/api/payments/me'),
     ]);
     setRows(list);
     setUnits(piece);
+    setAccount(money_);
     setLoading(false);
   }, []);
 
@@ -118,15 +122,58 @@ export default function MyShiftsPage() {
       <p className="page-sub">После смены запишите, что сделали — по этому считается доплата.</p>
 
       <div className="kpis" style={{ margin: '14px 0 6px' }}>
-        <div className="kpi kpi--accent">
+        <div className="kpi kpi--dark">
           <div className="kpi__label">Смен в этом месяце</div>
           <div className="kpi__value">{stats.count}</div>
+          <div className="kpi__hint">начислено {money(stats.pay)} ₽</div>
         </div>
         <div className="kpi">
-          <div className="kpi__label">Начислено</div>
-          <div className="kpi__value">{money(stats.pay)} ₽</div>
+          <div className="kpi__label">Заработано всего</div>
+          <div className="kpi__value">{money(account?.balance?.earned || 0)} ₽</div>
+          {Number(account?.balance?.penalty) > 0 && (
+            <div className="kpi__hint">штрафы −{money(account.balance.penalty)} ₽</div>
+          )}
+        </div>
+        <div className="kpi">
+          <div className="kpi__label">Выплачено</div>
+          <div className="kpi__value">{money(account?.balance?.paid || 0)} ₽</div>
+        </div>
+        <div className={'kpi ' + (Number(account?.balance?.balance) > 0 ? 'kpi--accent' : '')}>
+          <div className="kpi__label">
+            {Number(account?.balance?.balance) < 0 ? 'Выдано авансом' : 'Не оплачено'}
+          </div>
+          <div className="kpi__value">{money(Math.abs(account?.balance?.balance || 0))} ₽</div>
         </div>
       </div>
+
+      {account && (account.payments.length > 0 || account.penalties.length > 0) && (
+        <>
+          <div className="section">Расчёты со мной</div>
+          <div className="card card--flat">
+            {account.payments.map((p) => (
+              <div className="person" key={p.id}>
+                <div>
+                  <div className="person__name">Выплачено {money(p.amount)} ₽</div>
+                  <div className="person__meta">
+                    {longDate(p.paid_on)}
+                    {p.comment ? ` · ${p.comment}` : ''}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {account.penalties.map((f) => (
+              <div className="person" key={f.id}>
+                <div>
+                  <div className="person__name" style={{ color: 'var(--bad)' }}>
+                    Штраф −{money(f.amount)} ₽
+                  </div>
+                  <div className="person__meta">{longDate(f.penalty_on)} · {f.reason}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {stats.noOutput > 0 && (
         <div className="alert" style={{ borderColor: 'var(--wait)', background: 'var(--wait-soft)', color: '#7a4400' }}>

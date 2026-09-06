@@ -15,6 +15,7 @@ import shiftRoutes from './routes/shifts.js';
 import outputRoutes from './routes/outputs.js';
 import rateRoutes from './routes/rates.js';
 import reportRoutes from './routes/reports.js';
+import paymentRoutes from './routes/payments.js';
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' } });
 
@@ -38,6 +39,7 @@ await app.register(shiftRoutes,     { prefix: '/api/shifts' });
 await app.register(outputRoutes,    { prefix: '/api/outputs' });
 await app.register(rateRoutes,      { prefix: '/api/rates' });
 await app.register(reportRoutes,    { prefix: '/api/reports' });
+await app.register(paymentRoutes,   { prefix: '/api/payments' });
 
 // Первый запуск: если админов нет — заводим по данным из .env,
 // иначе в систему было бы некому войти и некому подтверждать заявки.
