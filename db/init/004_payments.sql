@@ -3,7 +3,7 @@
 -- Выплата не привязана к конкретной смене: на складе платят «за период»,
 -- а не за каждый выход по отдельности.
 
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   amount      numeric(12,2) NOT NULL CHECK (amount > 0),
@@ -14,9 +14,9 @@ CREATE TABLE payments (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX payments_employee_idx ON payments (employee_id, paid_on DESC);
+CREATE INDEX IF NOT EXISTS payments_employee_idx ON payments (employee_id, paid_on DESC);
 
-CREATE TABLE penalties (
+CREATE TABLE IF NOT EXISTS penalties (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id uuid NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   amount      numeric(12,2) NOT NULL CHECK (amount > 0),
@@ -28,11 +28,11 @@ CREATE TABLE penalties (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX penalties_employee_idx ON penalties (employee_id, penalty_on DESC);
+CREATE INDEX IF NOT EXISTS penalties_employee_idx ON penalties (employee_id, penalty_on DESC);
 
 -- Лицевой счёт: сколько человек заработал за всё время, сколько удержано,
 -- сколько получил и сколько за ним осталось.
-CREATE VIEW v_employee_balance AS
+CREATE OR REPLACE VIEW v_employee_balance AS
 SELECT
   e.id                                   AS employee_id,
   e.last_name || ' ' || e.first_name     AS employee_name,
