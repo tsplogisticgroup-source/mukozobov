@@ -1,10 +1,22 @@
-// Знак «Смены» — ботинок в профиль: склад комплектует обувь.
-// Носок слева, голенище справа, отдельной фигурой — подошва.
+// Знак «Смены» — кожаная бирка: монограмма и прострочка по канту.
+// Плашка красится через currentColor, буква и строчка всегда кремовые,
+// поэтому знак одинаково читается и в тёмной шапке, и на светлой странице.
 export default function Mark({ className = 'brand__mark' }) {
   return (
-    <svg className={className} viewBox="0 0 64 48" aria-hidden="true">
-      <path d="M9 37c-2.2-5.4-1.4-10.6 2.4-15.4.9-1.1 2.1-1.9 3.5-2.3l17.4-5c2.6-.7 4.4-3.1 4.4-5.8V6.5C36.7 4 38.7 2 41.2 2h12.3C56 2 58 4 58 6.5V37H9z" />
-      <path d="M5 38h54c2.8 0 5 2.2 5 5s-2.2 5-5 5H5c-2.8 0-5-2.2-5-5s2.2-5 5-5z" opacity="0.6" />
+    <svg className={className} viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="15" fill="currentColor" />
+      <rect
+        x="5" y="5" width="54" height="54" rx="11"
+        fill="none" stroke="#f9f4ec" strokeOpacity="0.5"
+        strokeWidth="1.6" strokeDasharray="4 4"
+      />
+      <text
+        x="32" y="45" textAnchor="middle"
+        fontFamily="Spectral, Georgia, serif" fontSize="38" fontWeight="700"
+        fill="#f9f4ec"
+      >
+        С
+      </text>
     </svg>
   );
 }

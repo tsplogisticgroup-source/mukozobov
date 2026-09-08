@@ -108,7 +108,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   line-height: 1;
 }
 
-.brand__mark { width: 30px; height: 22px; flex: none; color: var(--gold); }
+.brand__mark { width: 26px; height: 26px; flex: none; color: var(--tan); border-radius: 6px; }
 .brand__mark path { fill: currentColor; }
 
 .topbar__me {
@@ -509,7 +509,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 
 .auth__logo { display: flex; align-items: center; gap: 12px; }
-.auth__logo .brand__mark { width: 46px; height: 34px; color: var(--tan); }
+.auth__logo .brand__mark { width: 44px; height: 44px; color: var(--tan); }
 .auth__logo-name { font-family: var(--display); font-size: 40px; font-weight: 700; letter-spacing: 0.04em; line-height: 1; }
 .auth__tag { color: var(--ink-2); margin: 12px 0 24px; font-size: 14.5px; }
 
@@ -581,7 +581,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   }
 
   .side__brand { display: flex; align-items: center; gap: 11px; padding: 0 6px 20px; }
-  .side__brand .brand__mark { width: 38px; height: 28px; }
+  .side__brand .brand__mark { width: 34px; height: 34px; }
   .side__brand .brand__name { font-size: 26px; }
 
   .side__nav { display: flex; flex-direction: column; gap: 3px; }
@@ -635,7 +635,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
   .auth-side h2 { font-size: 40px; line-height: 1.15; max-width: 15ch; }
   .auth-side p { color: #c3b3a3; max-width: 46ch; margin: 0; }
-  .auth-side .brand__mark { width: 74px; height: 54px; color: var(--tan); }
+  .auth-side .brand__mark { width: 68px; height: 68px; color: var(--tan); }
   .auth-side ul { margin: 6px 0 0; padding-left: 20px; color: #c3b3a3; line-height: 1.9; }
 
   .auth { flex: none; width: 460px; max-width: 46vw; padding: 40px 46px; }
