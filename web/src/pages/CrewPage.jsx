@@ -27,13 +27,13 @@ function PersonRow({ emp, can, onChange, onRates, children }) {
             <select
               value={emp.role}
               onChange={(e) => onChange(emp, { role: e.target.value })}
-              style={{ minHeight: 38, border: '1px solid var(--line-2)', borderRadius: 8, padding: '0 6px', fontSize: 13 }}
+              style={{ minHeight: 44, border: '1px solid var(--line-2)', borderRadius: 8, padding: '0 8px', fontSize: 14 }}
             >
               <option value="picker">Комплектовщик</option>
               <option value="senior">Старший</option>
               <option value="admin">Руководитель</option>
             </select>
-            <button className="btn btn--sm btn--ghost" onClick={() => onRates(emp)}>₽</button>
+            <button className="btn btn--sm btn--ghost" onClick={() => onRates(emp)}>Ставка</button>
           </>
         )}
       </div>

@@ -104,32 +104,22 @@ export default function RatesPage() {
 
       <div className="section">За смену, ₽</div>
       <div className="card">
-        <table className="tbl">
-          <thead>
-            <tr><th>Должность</th><th className="n">День</th><th className="n">Ночь</th></tr>
-          </thead>
-          <tbody>
-            {ROLES.map((role) => (
-              <tr key={role}>
-                <td>{ROLE_NAME[role]}</td>
-                {KINDS.map((kind) => (
-                  <td className="n" key={kind}>
-                    <input
-                      inputMode="numeric"
-                      value={draft[`${role}-${kind}`] ?? ''}
-                      onChange={(e) => setDraft({ ...draft, [`${role}-${kind}`]: e.target.value })}
-                      style={{
-                        width: 90, minHeight: 42, textAlign: 'right',
-                        border: '1px solid var(--line-2)', borderRadius: 8, padding: '0 8px',
-                      }}
-                    />
-                  </td>
-                ))}
-              </tr>
+        {ROLES.map((role) => (
+          <div className="rate-row" key={role}>
+            <div className="rate-row__name">{ROLE_NAME[role]}</div>
+            {KINDS.map((kind) => (
+              <label className="rate-row__field" key={kind}>
+                <span>{KIND_NAME[kind]}</span>
+                <input
+                  inputMode="numeric"
+                  value={draft[`${role}-${kind}`] ?? ''}
+                  onChange={(e) => setDraft({ ...draft, [`${role}-${kind}`]: e.target.value })}
+                />
+              </label>
             ))}
-          </tbody>
-        </table>
-        <button className="btn btn--accent btn--wide" style={{ marginTop: 12 }} onClick={saveShiftRates}>
+          </div>
+        ))}
+        <button className="btn btn--accent btn--wide" style={{ marginTop: 14 }} onClick={saveShiftRates}>
           Сохранить ставки
         </button>
       </div>
@@ -150,7 +140,7 @@ export default function RatesPage() {
                 inputMode="decimal"
                 value={draft[`p-${r.id}`] ?? ''}
                 onChange={(e) => setDraft({ ...draft, [`p-${r.id}`]: e.target.value })}
-                style={{ width: 80, minHeight: 40, textAlign: 'right', border: '1px solid var(--line-2)', borderRadius: 8, padding: '0 8px' }}
+                className="piece-input"
               />
               <button className="btn btn--sm" onClick={() => savePiece(r)}>OK</button>
             </div>

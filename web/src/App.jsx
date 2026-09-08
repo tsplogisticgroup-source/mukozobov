@@ -1,4 +1,5 @@
-import { NavLink, Navigate, Route, Routes, Link } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { NavLink, Navigate, Route, Routes, Link, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth.jsx';
 import { api } from './lib/api.js';
 import { initials, ROLE_NAME, ROLE_SHORT } from './lib/format.js';
@@ -37,6 +38,15 @@ function Avatar({ emp }) {
 function Shell({ children }) {
   const { me } = useAuth();
   const menu = useMenu();
+  const tabsRef = useRef(null);
+  const { pathname } = useLocation();
+
+  // Вкладки не помещаются в ширину телефона: подкручиваем активную
+  // к видимой части, иначе её попросту не найти.
+  useEffect(() => {
+    const active = tabsRef.current?.querySelector('.tab--on');
+    active?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }, [pathname]);
 
   return (
     <div className="app">
@@ -82,7 +92,7 @@ function Shell({ children }) {
           </div>
         </header>
 
-        <nav className="tabs">
+        <nav className="tabs" ref={tabsRef}>
           {menu.map((m) => (
             <NavLink
               key={m.to}
