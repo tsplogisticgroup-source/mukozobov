@@ -3138,8 +3138,8 @@ function SkladLedger() {
     XLSX.utils.book_append_sheet(wb, ws, 'Карточки WB');
     XLSX.writeFile(wb, `kartochki_wb_${todayISO()}.xlsx`);
   }
-  // Движение товара ТОЛЬКО по артикулам из приёмки машины: приход/отгрузка/брак/
-  // фото с датами и № поставки + остатки. Файл Excel (два листа).
+  // Движение товара ТОЛЬКО по артикулам из приёмки машины — ОДНА СТРОКА НА АРТИКУЛ:
+  // в строке сразу приход (с датами), отгрузки (по поставкам), брак, фото и остаток.
   function exportReceivingMovement() {
     // Артикулы, пришедшие через приёмку машины (recvId или комментарий «Приёмка машины»).
     const recvArticles = new Set();
@@ -3149,23 +3149,47 @@ function SkladLedger() {
       }
     });
     if (!recvArticles.size) { alert('Не нашёл артикулов из приёмки машины. Сначала оформи приёмку с товаром.'); return; }
-    const inSet = a => recvArticles.has(canonArticle(a));
-    const sz = s => s === NO_SIZE ? '' : s;
-    // Лист 1 — движение (все операции по этим артикулам).
-    const rows = [];
-    incomes.filter(i => inSet(i.article)).forEach(i => rows.push({ _a: canonArticle(i.article), _d: i.date || '', 'Дата': i.date || '', 'Артикул': canonArticle(i.article), 'Операция': 'Приход', 'Размер': sz(i.size), 'Количество': i.qty, 'Поставка / №': '', 'Комментарий': i.note || '' }));
-    shipments.filter(s => inSet(s.article)).forEach(s => rows.push({ _a: canonArticle(s.article), _d: s.date || '', 'Дата': s.date || '', 'Артикул': canonArticle(s.article), 'Операция': 'Отгрузка', 'Размер': sz(s.size), 'Количество': s.qty, 'Поставка / №': s.shipmentNumber || '', 'Комментарий': s.note || '' }));
-    defects.filter(d => inSet(d.article)).forEach(d => rows.push({ _a: canonArticle(d.article), _d: d.date || '', 'Дата': d.date || '', 'Артикул': canonArticle(d.article), 'Операция': 'Брак', 'Размер': sz(d.size), 'Количество': d.qty, 'Поставка / №': d.shipmentNumber || '', 'Комментарий': d.note || '' }));
-    photo.filter(p => inSet(p.article)).forEach(p => rows.push({ _a: canonArticle(p.article), _d: p.date || '', 'Дата': p.date || '', 'Артикул': canonArticle(p.article), 'Операция': 'Фотостудия', 'Размер': sz(p.size), 'Количество': p.qty, 'Поставка / №': '', 'Комментарий': p.note || '' }));
-    rows.sort((a, b) => a._a.localeCompare(b._a, undefined, { numeric: true }) || (a._d < b._d ? -1 : a._d > b._d ? 1 : 0));
-    const moveSheet = rows.map(r => ({ 'Дата': r['Дата'], 'Артикул': r['Артикул'], 'Операция': r['Операция'], 'Размер': r['Размер'], 'Количество': r['Количество'], 'Поставка / №': r['Поставка / №'], 'Комментарий': r['Комментарий'] }));
-    // Лист 2 — остатки по этим артикулам.
-    const sumRows = summary.filter(s => recvArticles.has(s.article))
-      .sort((a, b) => a.article.localeCompare(b.article, undefined, { numeric: true }))
-      .map(s => ({ 'Артикул': s.article, 'Категория': articleCategory(s.article), 'Бренд': articleBrands(s.article).join(', '), 'Приход': s.income, 'Отгружено': s.shipped, 'Брак': s.defect, 'Фотостудия': s.photo, 'Остаток': s.balance }));
+    const arts = [...recvArticles].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const sum = arr => arr.reduce((s, x) => s + (Number(x.qty) || 0), 0);
+    const rows = arts.map(art => {
+      const inc = incomes.filter(i => canonArticle(i.article) === art);
+      const shp = shipments.filter(s => canonArticle(s.article) === art);
+      const def = defects.filter(d => canonArticle(d.article) === art);
+      const ph = photo.filter(p => canonArticle(p.article) === art);
+      // Приход по датам: «25.08.2026 — 24; 28.08.2026 — 16»
+      const incByDate = {};
+      inc.forEach(i => { incByDate[i.date] = (incByDate[i.date] || 0) + (Number(i.qty) || 0); });
+      const incStr = Object.entries(incByDate).sort((a, b) => a[0] < b[0] ? -1 : 1)
+        .map(([d, q]) => `${fmtDate(d)} — ${q}`).join('; ');
+      // Отгрузки по поставкам: «№WB-123 · 30.08.2026 — 24; …»
+      const shpBySupply = {};
+      shp.forEach(s => {
+        const k = s.shipmentNumber || '—';
+        if (!shpBySupply[k]) shpBySupply[k] = { qty: 0, date: s.date };
+        shpBySupply[k].qty += (Number(s.qty) || 0);
+        if (s.date && (!shpBySupply[k].date || s.date < shpBySupply[k].date)) shpBySupply[k].date = s.date;
+      });
+      const shpStr = Object.entries(shpBySupply).sort((a, b) => (a[1].date || '') < (b[1].date || '') ? -1 : 1)
+        .map(([num, v]) => `№${num} · ${fmtDate(v.date)} — ${v.qty}`).join('; ');
+      const suRec = summary.find(s => s.article === art);
+      const incTotal = sum(inc), shpTotal = sum(shp), defTotal = sum(def), phTotal = sum(ph);
+      return {
+        'Артикул': art,
+        'Бренд': articleBrands(art).join(', '),
+        'Категория': articleCategory(art),
+        'Приход, шт.': incTotal,
+        'Приходы (дата — кол-во)': incStr,
+        'Отгружено, шт.': shpTotal,
+        'Отгрузки (№ поставки · дата — кол-во)': shpStr,
+        'Брак, шт.': defTotal,
+        'Фотостудия, шт.': phTotal,
+        'Остаток, шт.': suRec ? suRec.balance : (incTotal - shpTotal - defTotal - phTotal),
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{ wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 11 }, { wch: 42 }, { wch: 13 }, { wch: 52 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(moveSheet), 'Движение');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sumRows), 'Остатки');
+    XLSX.utils.book_append_sheet(wb, ws, 'Движение по артикулам');
     XLSX.writeFile(wb, `dvizhenie_priyomka_${todayISO()}.xlsx`);
   }
   function historyFor(article) {
