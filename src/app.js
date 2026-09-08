@@ -3138,6 +3138,36 @@ function SkladLedger() {
     XLSX.utils.book_append_sheet(wb, ws, 'Карточки WB');
     XLSX.writeFile(wb, `kartochki_wb_${todayISO()}.xlsx`);
   }
+  // Движение товара ТОЛЬКО по артикулам из приёмки машины: приход/отгрузка/брак/
+  // фото с датами и № поставки + остатки. Файл Excel (два листа).
+  function exportReceivingMovement() {
+    // Артикулы, пришедшие через приёмку машины (recvId или комментарий «Приёмка машины»).
+    const recvArticles = new Set();
+    incomes.forEach(i => {
+      if (i.recvId || (typeof i.note === 'string' && i.note.startsWith('Приёмка машины'))) {
+        recvArticles.add(canonArticle(i.article));
+      }
+    });
+    if (!recvArticles.size) { alert('Не нашёл артикулов из приёмки машины. Сначала оформи приёмку с товаром.'); return; }
+    const inSet = a => recvArticles.has(canonArticle(a));
+    const sz = s => s === NO_SIZE ? '' : s;
+    // Лист 1 — движение (все операции по этим артикулам).
+    const rows = [];
+    incomes.filter(i => inSet(i.article)).forEach(i => rows.push({ _a: canonArticle(i.article), _d: i.date || '', 'Дата': i.date || '', 'Артикул': canonArticle(i.article), 'Операция': 'Приход', 'Размер': sz(i.size), 'Количество': i.qty, 'Поставка / №': '', 'Комментарий': i.note || '' }));
+    shipments.filter(s => inSet(s.article)).forEach(s => rows.push({ _a: canonArticle(s.article), _d: s.date || '', 'Дата': s.date || '', 'Артикул': canonArticle(s.article), 'Операция': 'Отгрузка', 'Размер': sz(s.size), 'Количество': s.qty, 'Поставка / №': s.shipmentNumber || '', 'Комментарий': s.note || '' }));
+    defects.filter(d => inSet(d.article)).forEach(d => rows.push({ _a: canonArticle(d.article), _d: d.date || '', 'Дата': d.date || '', 'Артикул': canonArticle(d.article), 'Операция': 'Брак', 'Размер': sz(d.size), 'Количество': d.qty, 'Поставка / №': d.shipmentNumber || '', 'Комментарий': d.note || '' }));
+    photo.filter(p => inSet(p.article)).forEach(p => rows.push({ _a: canonArticle(p.article), _d: p.date || '', 'Дата': p.date || '', 'Артикул': canonArticle(p.article), 'Операция': 'Фотостудия', 'Размер': sz(p.size), 'Количество': p.qty, 'Поставка / №': '', 'Комментарий': p.note || '' }));
+    rows.sort((a, b) => a._a.localeCompare(b._a, undefined, { numeric: true }) || (a._d < b._d ? -1 : a._d > b._d ? 1 : 0));
+    const moveSheet = rows.map(r => ({ 'Дата': r['Дата'], 'Артикул': r['Артикул'], 'Операция': r['Операция'], 'Размер': r['Размер'], 'Количество': r['Количество'], 'Поставка / №': r['Поставка / №'], 'Комментарий': r['Комментарий'] }));
+    // Лист 2 — остатки по этим артикулам.
+    const sumRows = summary.filter(s => recvArticles.has(s.article))
+      .sort((a, b) => a.article.localeCompare(b.article, undefined, { numeric: true }))
+      .map(s => ({ 'Артикул': s.article, 'Категория': articleCategory(s.article), 'Бренд': articleBrands(s.article).join(', '), 'Приход': s.income, 'Отгружено': s.shipped, 'Брак': s.defect, 'Фотостудия': s.photo, 'Остаток': s.balance }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(moveSheet), 'Движение');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sumRows), 'Остатки');
+    XLSX.writeFile(wb, `dvizhenie_priyomka_${todayISO()}.xlsx`);
+  }
   function historyFor(article) {
     const ins = incomes.filter(i => i.article === article).map(i => _objectSpread(_objectSpread({}, i), {}, {
       type: 'income'
@@ -3407,6 +3437,11 @@ function SkladLedger() {
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: recvSaving, onClick: submitReceiving }, recvSaving ? "Сохраняю…" : "Сохранить приёмку"),
         recvProgress && /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } }, recvProgress))),
     /*#__PURE__*/React.createElement(Section, { title: `Журнал приёмок (${receiving.length})`, icon: /*#__PURE__*/React.createElement(Clock, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { marginBottom: 12 } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: exportReceivingMovement },
+          /*#__PURE__*/React.createElement(Download, { size: 14 }), " Движение по артикулам приёмки → Excel"),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 } },
+          "Приход/отгрузка/брак с датами и № поставки + остатки — только по артикулам, пришедшим через приёмку машины.")),
       receiving.length === 0
         ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, role === 'fulfillment' ? "Пока нет записей. Добавь первую приёмку выше." : "Пока нет записей о приёмке машин.")
         : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 12 } },

@@ -3,21 +3,27 @@
   "configurations": [
     {
       "name": "dev",
-      "runtimeExecutable": "C:\\Program Files\\nodejs\\node.exe",
+      "runtimeExecutable": "C:\Program Files\nodejs\node.exe",
       "runtimeArgs": ["node_modules/vite/bin/vite.js"],
       "port": 5173
     },
     {
       "name": "stroycrm-api",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "C:\\Users\\imya\\Desktop\\stroy-crm\\server", "run", "dev"],
+      "runtimeArgs": ["--prefix", "C:\Users\imya\Desktop\stroy-crm\server", "run", "dev"],
       "port": 3001
     },
     {
       "name": "stroycrm-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "C:\\Users\\imya\\Desktop\\stroy-crm\\web", "run", "dev"],
+      "runtimeArgs": ["--prefix", "C:\Users\imya\Desktop\stroy-crm\web", "run", "dev"],
       "port": 5174
+    },
+    {
+      "name": "smena-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:/Users/imya/Desktop/smena/web", "run", "dev"],
+      "port": 5175
     }
   ]
 }
