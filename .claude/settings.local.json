@@ -201,7 +201,9 @@
       "Bash(node \"C:/Users/imya/AppData/Local/Temp/claude/C--Users-imya-Desktop-WMS-----------/96dd8db5-8dce-47a9-b83e-8c2f671b2674/scratchpad/decodeall.js\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/app.js)",
       "Bash(node --check wb-cards-worker.js)",
-      "Bash(curl -s \"https://shrill-term-ab11.tsplogisticgroup.workers.dev/fbs/warehouses\")"
+      "Bash(curl -s \"https://shrill-term-ab11.tsplogisticgroup.workers.dev/fbs/warehouses\")",
+      "Bash(grep -n \"fbsAssignments, setFbsAssignments\\\\|async function deleteFbsAssignment\\\\|const fbsContent =\\\\|showFbsCreate && \\\\|Задания \\(\\\\${fbsAssignments.length}\\)\" src/app.js)",
+      "Bash(grep -n \"const fbsTh = \\\\|const fbsContent = \\\\|Задания \\(\\\\${fbsAssignments.length}\\)\\\\|printMode && /\\\\*#__PURE__\\\\*/React.createElement\\(LabelPrintView\\\\|\\\\.skl-label svg { width: 52mm\" src/app.js)"
     ]
   }
 }

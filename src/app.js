@@ -296,6 +296,19 @@ const KEY_GRIDS = 'sklad:grids';
 const KEY_BRANDS = 'sklad:brands'; // code -> присвоенный бренд артикула
 const KEY_FBS_ASSIGN = 'sklad:fbs_assignments'; // индекс заданий на сборку FBS
 const FBS_ASSIGN_PREFIX = 'sklad:fbs_assignment:'; // детали задания (по одному ключу на задание)
+// Сканер в режиме клавиатуры при РУССКОЙ раскладке печатает кириллицу вместо латиницы
+// (Честный Знак содержит буквы и символы). Переводим обратно по позиции клавиш.
+const FBS_RU = 'ёйцукенгшщзхъфывапролджэячсмитьбю.ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,"№;:?';
+const FBS_EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&";
+function fixKbLayout(s) {
+  if (!/[а-яё]/i.test(s)) return s;
+  let out = '';
+  for (const ch of s) {
+    const i = FBS_RU.indexOf(ch);
+    out += i >= 0 ? FBS_EN[i] : ch;
+  }
+  return out;
+}
 const ACTIONS_KEEP = 50;
 const KEY_LAST_BACKUP = 'sklad:meta:lastBackup';
 const BACKUP_PREFIX = 'sklad:backup:';
@@ -794,6 +807,15 @@ function SkladLedger() {
   const [fbsCreateName, setFbsCreateName] = useState('');
   const [fbsCreateSearch, setFbsCreateSearch] = useState('');
   const [fbsCreating, setFbsCreating] = useState(false);
+  // Станция сборки: открытое задание и шаг сканирования.
+  const [fbsOpen, setFbsOpen] = useState(null); // детали задания {id,name,orders,supplyId,...}
+  const [fbsStep, setFbsStep] = useState('ean'); // ean | kiz | sticker
+  const [fbsCurId, setFbsCurId] = useState(null); // orderId текущего заказа
+  const [fbsScan, setFbsScan] = useState('');
+  const [fbsMsg, setFbsMsg] = useState(null); // {type: ok|err|info, text}
+  const [fbsWorking, setFbsWorking] = useState(false);
+  const [fbsPrintImg, setFbsPrintImg] = useState(null); // {src, n} — стикер на печать
+  const fbsScanRef = useRef(null);
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
@@ -2157,6 +2179,180 @@ function SkladLedger() {
     try { await window.storage.delete(FBS_ASSIGN_PREFIX + a.id); } catch (_) {}
     await persist(KEY_FBS_ASSIGN, fbsAssignments.filter(x => x.id !== a.id), setFbsAssignments);
   }
+  // ── Станция сборки ───────────────────────────────────────────────────────────
+  // Запрос к WB через воркер. WB на часть действий отвечает 204 без тела — это ок.
+  async function wbCall(path, method, body) {
+    const res = await fetch(`${WB_PROXY_URL}${path}`, {
+      method: method || 'GET',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch (_) { data = { raw: text }; }
+    if (!res.ok || data.error) {
+      const msg = data.error || data.message || data.detail || data.raw || `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return data;
+  }
+  async function reloadFbsAssignments() {
+    try {
+      const r = await window.storage.get(KEY_FBS_ASSIGN, true);
+      const v = r ? JSON.parse(r.value) : [];
+      setFbsAssignments(Array.isArray(v) ? v : []);
+    } catch (_) {}
+  }
+  function focusFbsScan() {
+    setTimeout(() => { if (fbsScanRef.current) fbsScanRef.current.focus(); }, 30);
+  }
+  async function openFbsAssignment(a) {
+    try {
+      const r = await window.storage.get(FBS_ASSIGN_PREFIX + a.id, true);
+      if (!r) { alert('Задание не найдено (возможно, удалено).'); return; }
+      setFbsOpen(JSON.parse(r.value));
+      setFbsStep('ean'); setFbsCurId(null); setFbsScan('');
+      setFbsMsg({ type: 'info', text: 'Отсканируй EAN товара.' });
+      focusFbsScan();
+    } catch (e) { alert('Не удалось открыть задание: ' + (e.message || e)); }
+  }
+  function closeFbsStation() {
+    setFbsOpen(null); setFbsCurId(null); setFbsStep('ean'); setFbsMsg(null);
+    reloadFbsAssignments();
+  }
+  const fbsPatchOrder = (d, id, patch) => ({ ...d, orders: d.orders.map(o => o.orderId === id ? { ...o, ...patch } : o) });
+  // Сохраняем задание (своим ключом — станции не мешают друг другу) и счётчик «собрано» в индексе.
+  async function saveFbsDetail(d) {
+    setFbsOpen(d);
+    await window.storage.set(FBS_ASSIGN_PREFIX + d.id, JSON.stringify(d));
+    const done = d.orders.filter(o => o.done).length;
+    const known = fbsAssignments.find(x => x.id === d.id);
+    if (known && known.done === done) return;
+    try { // перечитываем индекс перед записью — чтобы не затереть счётчики других станций
+      const r = await window.storage.get(KEY_FBS_ASSIGN, true);
+      const cur = r ? JSON.parse(r.value) : [];
+      const next = (Array.isArray(cur) ? cur : []).map(x => x.id === d.id ? { ...x, done } : x);
+      await persist(KEY_FBS_ASSIGN, next, setFbsAssignments);
+    } catch (_) {}
+  }
+  // Открытая поставка задания; если нет (или уже передана в доставку) — создаём новую.
+  async function ensureFbsSupply(d) {
+    if (d.supplyId && !d.supplyDelivered) return d;
+    const res = await wbCall('/fbs/supplies', 'POST', { name: `${d.name} · ${new Date().toLocaleDateString('ru-RU')}` });
+    if (!res.id) throw new Error('WB не вернул номер поставки');
+    const prev = d.supplyId ? [...(d.prevSupplies || []), d.supplyId] : (d.prevSupplies || []);
+    const nd = { ...d, supplyId: res.id, supplyDelivered: false, prevSupplies: prev };
+    await saveFbsDetail(nd);
+    return nd;
+  }
+  async function fetchAndPrintFbsSticker(orderId) {
+    const data = await wbCall('/fbs/stickers?type=png&width=58&height=40', 'POST', { orders: [orderId] });
+    const st = (data.stickers || [])[0];
+    if (!st || !st.file) throw new Error('WB не вернул стикер для заказа ' + orderId);
+    const src = String(st.file).startsWith('data:') ? st.file : `data:image/png;base64,${st.file}`;
+    setFbsPrintImg({ src, n: Date.now() });
+    return st;
+  }
+  // Печать стикера после загрузки картинки; после печати убираем лист.
+  useEffect(() => {
+    const after = () => setFbsPrintImg(null);
+    window.addEventListener('afterprint', after);
+    return () => window.removeEventListener('afterprint', after);
+  }, []);
+  async function finishFbsOrder(d, cur) {
+    const nd = fbsPatchOrder(d, cur.orderId, { done: true, doneAt: new Date().toISOString() });
+    await saveFbsDetail(nd);
+    setFbsCurId(null); setFbsStep('ean');
+    const left = nd.orders.filter(o => !o.done).length;
+    setFbsMsg({ type: 'ok', text: left ? `✓ ${cur.code} р.${cur.size || '?'} собран. Осталось ${left}. Сканируй следующий EAN.` : '✓ Задание собрано полностью!' });
+    focusFbsScan();
+  }
+  // Главный обработчик скана. Порядок WB: заказ в поставку → КИЗ → стикер → скан стикера.
+  async function handleFbsScan(raw) {
+    const value = fixKbLayout(String(raw || '').replace(/[\r\n\t]/g, '').trim());
+    setFbsScan('');
+    if (!value || !fbsOpen) return;
+    if (fbsWorking) { setFbsMsg({ type: 'err', text: 'Подожди — идёт связь с WB, затем повтори скан.' }); return; }
+    let d = fbsOpen;
+    setFbsWorking(true);
+    try {
+      if (fbsStep === 'ean') {
+        const cand = d.orders.filter(o => o.barcode === value && !o.done);
+        const cur = cand.find(o => o.inSupply) || cand[0]; // сначала — начатый, потом новый
+        if (!cur) {
+          const doneSame = d.orders.some(o => o.barcode === value);
+          setFbsMsg({ type: 'err', text: doneSame ? `EAN ${value}: все заказы с этим товаром уже собраны.` : `EAN ${value}: такого товара нет в этом задании.` });
+          return;
+        }
+        setFbsCurId(cur.orderId);
+        if (cur.sgtin && !cur.stickerBarcode) {
+          const st = await fetchAndPrintFbsSticker(cur.orderId);
+          d = fbsPatchOrder(d, cur.orderId, { stickerBarcode: st.barcode || '', stickerParts: `${st.partA || ''} ${st.partB || ''}`.trim() });
+          await saveFbsDetail(d);
+          setFbsStep('sticker');
+          setFbsMsg({ type: 'info', text: `${cur.code} р.${cur.size || '?'}: КИЗ уже привязан, стикер печатается. Отсканируй стикер.` });
+        } else if (cur.sgtin) {
+          setFbsStep('sticker');
+          setFbsMsg({ type: 'info', text: `${cur.code} р.${cur.size || '?'}: стикер уже напечатан. Отсканируй стикер (или «Печать ещё раз»).` });
+        } else {
+          setFbsStep('kiz');
+          setFbsMsg({ type: 'info', text: `${cur.code} · р.${cur.size || '?'} · ${cur.brand || ''} — отсканируй Честный Знак.` });
+        }
+        return;
+      }
+      const cur = d.orders.find(o => o.orderId === fbsCurId);
+      if (!cur) { setFbsStep('ean'); setFbsMsg({ type: 'err', text: 'Текущий заказ потерян — отсканируй EAN заново.' }); return; }
+      if (fbsStep === 'kiz') {
+        if (/^\d{8,14}$/.test(value)) { setFbsMsg({ type: 'err', text: 'Это похоже на EAN, а нужен Честный Знак (квадратный код Data Matrix).' }); return; }
+        d = await ensureFbsSupply(d); // 1) поставка
+        if (!cur.inSupply) {           // 2) заказ в поставку → статус «на сборке»
+          await wbCall(`/fbs/supplies/${encodeURIComponent(d.supplyId)}/orders/${cur.orderId}`, 'PATCH');
+          d = fbsPatchOrder(d, cur.orderId, { inSupply: true, supplyId: d.supplyId });
+          await saveFbsDetail(d);
+        }
+        await wbCall(`/fbs/orders/${cur.orderId}/sgtin`, 'PUT', { sgtins: [value] }); // 3) КИЗ → WB
+        d = fbsPatchOrder(d, cur.orderId, { sgtin: value });
+        await saveFbsDetail(d);
+        const st = await fetchAndPrintFbsSticker(cur.orderId); // 4) стикер → печать
+        d = fbsPatchOrder(d, cur.orderId, { stickerBarcode: st.barcode || '', stickerParts: `${st.partA || ''} ${st.partB || ''}`.trim() });
+        await saveFbsDetail(d);
+        setFbsStep('sticker');
+        setFbsMsg({ type: 'ok', text: `КИЗ принят. Стикер ${st.partA || ''} ${st.partB || ''} печатается — наклей и отсканируй его.` });
+        return;
+      }
+      if (fbsStep === 'sticker') {
+        const flat = x => String(x || '').replace(/\s/g, '');
+        const ok = value === cur.stickerBarcode || flat(value) === flat(cur.stickerParts) || value === String(cur.orderId);
+        if (!ok) { setFbsMsg({ type: 'err', text: `Стикер не от этого заказа! Нужен стикер ${cur.stickerParts || cur.stickerBarcode}.` }); return; }
+        await finishFbsOrder(d, cur);
+      }
+    } catch (e) {
+      console.error(e);
+      setFbsMsg({ type: 'err', text: 'Ошибка WB: ' + (e.message || e) });
+    } finally {
+      setFbsWorking(false);
+      focusFbsScan();
+    }
+  }
+  async function reprintFbsSticker() {
+    if (!fbsCurId) return;
+    setFbsWorking(true);
+    try { await fetchAndPrintFbsSticker(fbsCurId); setFbsMsg({ type: 'info', text: 'Стикер отправлен на печать ещё раз.' }); }
+    catch (e) { setFbsMsg({ type: 'err', text: 'Ошибка WB: ' + (e.message || e) }); }
+    finally { setFbsWorking(false); focusFbsScan(); }
+  }
+  async function deliverFbsSupply() {
+    if (!fbsOpen || !fbsOpen.supplyId) return;
+    const hanging = fbsOpen.orders.filter(o => o.inSupply && !o.done).length;
+    if (!window.confirm(`Передать поставку ${fbsOpen.supplyId} в доставку?${hanging ? `\nВНИМАНИЕ: ${hanging} заказ(ов) в поставке не отбиты стикером.` : ''}\nПосле этого добавлять заказы в неё будет нельзя.`)) return;
+    setFbsWorking(true);
+    try {
+      await wbCall(`/fbs/supplies/${encodeURIComponent(fbsOpen.supplyId)}/deliver`, 'PATCH');
+      await saveFbsDetail({ ...fbsOpen, supplyDelivered: true });
+      setFbsMsg({ type: 'ok', text: `Поставка ${fbsOpen.supplyId} передана в доставку.` });
+    } catch (e) { setFbsMsg({ type: 'err', text: 'Ошибка WB: ' + (e.message || e) }); }
+    finally { setFbsWorking(false); }
+  }
   // Лист подбора: группируем заказы по коду+размеру+бренду, считаем количество.
   const fbsPickList = useMemo(() => {
     const map = {};
@@ -3345,7 +3541,72 @@ function SkladLedger() {
   const fbsTh = { padding: '6px 10px', fontWeight: 500 };
   const fbsTd = { padding: '7px 10px' };
   const fbsLbl = { fontSize: 12, color: 'var(--ink-soft)', marginBottom: 5 };
-  const fbsContent = /*#__PURE__*/React.createElement(React.Fragment, null,
+  // ── Станция сборки (открытое задание) ──
+  const fbsOpenTotal = fbsOpen ? fbsOpen.orders.length : 0;
+  const fbsOpenDone = fbsOpen ? fbsOpen.orders.filter(o => o.done).length : 0;
+  const fbsCurOrder = fbsOpen && fbsCurId ? fbsOpen.orders.find(o => o.orderId === fbsCurId) : null;
+  const fbsOpenGroups = (() => {
+    if (!fbsOpen) return [];
+    const m = {};
+    fbsOpen.orders.filter(o => !o.done).forEach(o => {
+      const k = `${o.code}|${o.size}`;
+      if (!m[k]) m[k] = { code: o.code, size: o.size, brand: o.brand, qty: 0 };
+      m[k].qty += 1;
+    });
+    return Object.values(m).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }) || (Number(a.size) || 0) - (Number(b.size) || 0));
+  })();
+  const fbsStationContent = fbsOpen && /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement(Section, { title: `Станция сборки · ${fbsOpen.name}`, icon: /*#__PURE__*/React.createElement(Printer, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: closeFbsStation }, "← К заданиям"),
+        /*#__PURE__*/React.createElement("span", { style: { fontSize: 14 } }, "Собрано: ", /*#__PURE__*/React.createElement("strong", null, fbsOpenDone), " из ", fbsOpenTotal),
+        fbsOpen.supplyId && /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, "Поставка: ", /*#__PURE__*/React.createElement("span", { className: "skl-mono" }, fbsOpen.supplyId)),
+        fbsOpen.supplyId && !fbsOpen.supplyDelivered && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking, onClick: deliverFbsSupply }, "Передать поставку в доставку"),
+        fbsOpen.supplyDelivered && /*#__PURE__*/React.createElement("span", { className: "skl-stamp", style: { color: 'var(--positive)' } }, "поставка передана")),
+      /*#__PURE__*/React.createElement("div", { style: { height: 8, background: 'var(--card-2)', borderRadius: 4, overflow: 'hidden', marginBottom: 14 } },
+        /*#__PURE__*/React.createElement("div", { style: { width: `${fbsOpenTotal ? Math.round(fbsOpenDone / fbsOpenTotal * 100) : 0}%`, height: '100%', background: 'var(--positive)', transition: 'width .2s' } })),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 } },
+        [['ean', '1. EAN товара'], ['kiz', '2. Честный Знак'], ['sticker', '3. Скан стикера']].map(([k, l]) => /*#__PURE__*/React.createElement("span", {
+          key: k, className: "skl-stamp",
+          style: { color: fbsStep === k ? 'var(--accent)' : 'var(--ink-soft)', borderColor: fbsStep === k ? 'var(--accent)' : 'var(--line)', fontWeight: fbsStep === k ? 700 : 500 }
+        }, l))),
+      fbsCurOrder && /*#__PURE__*/React.createElement("div", { className: "skl-card", style: { marginBottom: 12, borderColor: 'var(--accent)' } },
+        /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 28, fontWeight: 700 } }, fbsCurOrder.code, "  ·  р. ", fbsCurOrder.size || '?'),
+        /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)', marginTop: 4 } },
+          `${fbsCurOrder.brand || ''} · заказ ${fbsCurOrder.orderId}${fbsCurOrder.stickerParts ? ' · стикер ' + fbsCurOrder.stickerParts : ''}`)),
+      /*#__PURE__*/React.createElement("input", {
+        ref: fbsScanRef, className: "skl-input", autoFocus: true, value: fbsScan,
+        placeholder: fbsStep === 'ean' ? 'Сканируй EAN товара…' : fbsStep === 'kiz' ? 'Сканируй Честный Знак…' : 'Сканируй стикер FBS…',
+        onChange: e => setFbsScan(e.target.value),
+        onKeyDown: e => { if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handleFbsScan(e.currentTarget.value); } },
+        style: { fontSize: 20, height: 54, borderColor: 'var(--accent)' }
+      }),
+      fbsMsg && /*#__PURE__*/React.createElement("div", {
+        style: { marginTop: 10, fontSize: 15, fontWeight: 600, color: fbsMsg.type === 'err' ? 'var(--negative)' : fbsMsg.type === 'ok' ? 'var(--positive)' : 'var(--ink)' }
+      }, fbsWorking ? 'Связь с WB…' : fbsMsg.text),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
+        fbsStep === 'sticker' && fbsCurOrder && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking, onClick: reprintFbsSticker },
+          /*#__PURE__*/React.createElement(Printer, { size: 14 }), " Печать ещё раз"),
+        fbsStep === 'sticker' && fbsCurOrder && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking,
+          onClick: () => { if (window.confirm('Стикер точно наклеен на этот заказ? Подтвердить без скана?')) finishFbsOrder(fbsOpen, fbsCurOrder); } }, "Стикер наклеен — подтвердить"),
+        fbsCurOrder && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking,
+          onClick: () => { setFbsCurId(null); setFbsStep('ean'); setFbsMsg({ type: 'info', text: 'Сброшено. Сканируй EAN.' }); focusFbsScan(); } }, "Сбросить текущий"))),
+    /*#__PURE__*/React.createElement(Section, { title: `Осталось собрать (${fbsOpenTotal - fbsOpenDone})`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
+      fbsOpenGroups.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--positive)', fontSize: 14, fontWeight: 600 } }, "Всё собрано ✓")
+        : /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto' } },
+            /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
+              /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left' } },
+                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Артикул"),
+                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Размер"),
+                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Бренд"),
+                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Осталось"))),
+              /*#__PURE__*/React.createElement("tbody", null, fbsOpenGroups.map((g, i) => /*#__PURE__*/React.createElement("tr", { key: i, style: { borderTop: '1px solid var(--line)' } },
+                /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, g.code)),
+                /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, g.size || '—'),
+                /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, g.brand || '—'),
+                /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontWeight: 700 }, className: "skl-mono" }, g.qty))))))));
+  const fbsContent = fbsOpen ? fbsStationContent : /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement(Section, { title: "Сборочные задания FBS", icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsBusy, onClick: syncFbsOrders },
@@ -3407,15 +3668,22 @@ function SkladLedger() {
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
           `Выбрано: ${fbsCreateArticles.length || 'все'} арт. · возраст: ${fbsCreateAges.length || 'любой'}`))),
     /*#__PURE__*/React.createElement(Section, { title: `Задания (${fbsAssignments.length})`, icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { marginBottom: 10 } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: reloadFbsAssignments },
+          /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), " Обновить список")),
       fbsAssignments.length === 0
         ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Заданий пока нет. Создай задание кнопкой «Создать задание».")
         : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
             fbsAssignments.map(a => /*#__PURE__*/React.createElement("div", { key: a.id, className: "skl-card", style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
               /*#__PURE__*/React.createElement("div", null,
-                /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 15, fontWeight: 700 } }, a.name),
-                /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } }, `${a.total} заказов · создано ${fmtDate(String(a.createdAt).slice(0, 10))}`)),
-              /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteFbsAssignment(a) },
-                /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить"))))));
+                /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 15, fontWeight: 700 } }, a.name,
+                  (a.done || 0) >= a.total && a.total > 0 && /*#__PURE__*/React.createElement("span", { className: "skl-stamp", style: { color: 'var(--positive)', marginLeft: 8 } }, "собрано")),
+                /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } }, `Собрано ${a.done || 0} из ${a.total} · создано ${fmtDate(String(a.createdAt).slice(0, 10))}`)),
+              /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8 } },
+                /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", onClick: () => openFbsAssignment(a) },
+                  /*#__PURE__*/React.createElement(Printer, { size: 13 }), " Открыть сборку"),
+                /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteFbsAssignment(a) },
+                  /*#__PURE__*/React.createElement(Trash2, { size: 12 }), " Удалить")))))));
   const receivingContent = /*#__PURE__*/React.createElement(React.Fragment, null,
     role === 'fulfillment' && /*#__PURE__*/React.createElement(Section, { title: "Новая приёмка машины", icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12, marginBottom: 14 } },
@@ -3677,6 +3945,7 @@ function SkladLedger() {
           .skl-label .lbl-size { font-size: 9pt; font-weight: 700; margin: 0.3mm 0; }
           .skl-label .lbl-meta { font-size: 6pt; color: #000; }
           .skl-label svg { width: 52mm; height: 13mm; margin-top: auto; }
+          .skl-sticker-img { display: block; width: 58mm; height: 40mm; object-fit: contain; page-break-after: always; }
         }
       `), !role ? /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3827,7 +4096,15 @@ function SkladLedger() {
     /*#__PURE__*/React.createElement("line", { key: 3, x1: 21, y1: 12, x2: 9, y2: 12 })
   ])))), printMode && /*#__PURE__*/React.createElement(LabelPrintView, {
     items: printItems
-  }), /*#__PURE__*/React.createElement("div", {
+  }), fbsPrintImg && /*#__PURE__*/React.createElement("div", {
+    className: "skl-label-sheet"
+  }, /*#__PURE__*/React.createElement("img", {
+    key: fbsPrintImg.n,
+    className: "skl-sticker-img",
+    src: fbsPrintImg.src,
+    alt: "",
+    onLoad: () => setTimeout(() => window.print(), 30)
+  })), /*#__PURE__*/React.createElement("div", {
     className: "skl-topbar"
   }, /*#__PURE__*/React.createElement("div", { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 } }, /*#__PURE__*/React.createElement("button", {
     className: "skl-hamburger skl-iconbtn",

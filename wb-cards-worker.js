@@ -15,7 +15,7 @@
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, PUT, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -33,6 +33,11 @@ async function proxy(wbUrl, method, mpToken, body) {
     headers: { Authorization: mpToken, 'Content-Type': 'application/json' },
     body: body || undefined,
   });
+  // 204/205/304 — ответ без тела (WB так отвечает на «добавить в поставку», КИЗ,
+  // «передать в доставку»). Тело к таким статусам прикладывать нельзя — упадёт.
+  if (res.status === 204 || res.status === 205 || res.status === 304) {
+    return new Response(null, { status: res.status, headers: { ...CORS } });
+  }
   const text = await res.text();
   return new Response(text || '{}', {
     status: res.status,
@@ -63,6 +68,12 @@ export default {
         if (path === '/fbs/orders/status' && request.method === 'GET') {
           const ids = (url.searchParams.get('ids') || '').split(',').map(s => Number(s.trim())).filter(Boolean);
           return await proxy(`${MP}/api/v3/orders/status`, 'POST', mp, JSON.stringify({ orders: ids }));
+        }
+        // Привязка кода маркировки «Честный Знак» (КИЗ/sgtin) к заказу.
+        const mSgtin = path.match(/^\/fbs\/orders\/([^/]+)\/sgtin$/);
+        if (mSgtin && request.method === 'PUT') {
+          const body = await request.text();
+          return await proxy(`${MP}/api/v3/orders/${mSgtin[1]}/meta/sgtin`, 'PUT', mp, body);
         }
         if (path === '/fbs/stickers' && request.method === 'POST') {
           const qs = url.search || '?type=png&width=58&height=40';
