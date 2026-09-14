@@ -938,6 +938,8 @@ function SkladLedger() {
   const [fbsOverrideKiz, setFbsOverrideKiz] = useState(''); // КИЗ, принятый старшим несмотря на несовпадение GTIN
   const [fbsGtinConflict, setFbsGtinConflict] = useState(''); // КИЗ, упавший на проверке GTIN (для кнопки старшего)
   const [fbsShowOrders, setFbsShowOrders] = useState(false); // таблица «Заказы в задании»
+  const [fbsExpandedArts, setFbsExpandedArts] = useState({}); // раскрытые артикулы в станции
+  const [fbsStationSearch, setFbsStationSearch] = useState(''); // фильтр в станции: артикул / баркод / № заказа
   const [fbsCommission, setFbsCommission] = useState({}); // предмет → комиссия FBS, %
   const [fbsCommPct, setFbsCommPct] = useState(() => { try { return Number(localStorage.getItem('fbs_comm_pct')) || 25; } catch (_) { return 25; } });
   const fbsScanRef = useRef(null);
@@ -2634,6 +2636,30 @@ function SkladLedger() {
     } catch (e) { setFbsMsg({ type: 'err', text: 'Ошибка WB: ' + (e.message || e) }); }
     finally { setFbsWorking(false); }
   }
+  // ── Этикетки со штрихкодом на артикул (или на один размер) из задания ────────
+  // Печатается по одной этикетке на каждую несобранную пару — тем же макетом, что в «Этикетках».
+  function printFbsArticleLabels(code, barcode) {
+    if (!fbsOpen) return;
+    const live = fbsOpen.orders.filter(o => fbsLive(o) && o.code === code && (!barcode || o.barcode === barcode));
+    if (!live.length) { alert('Нечего печатать — все пары этого артикула уже собраны.'); return; }
+    const byBarcode = {}; // баркод → запись каталога (название, бренд)
+    Object.values(labelArticles).forEach(v => (v.sizes || []).forEach(s => { byBarcode[String(s.barcode)] = v; }));
+    const items = [...live]
+      .sort((a, b) => (parseFloat(a.size) || 0) - (parseFloat(b.size) || 0) || String(a.brand || '').localeCompare(String(b.brand || '')))
+      .map(o => {
+        const la = byBarcode[String(o.barcode)];
+        return {
+          article: code,
+          size: o.size || '',
+          barcode: o.barcode,
+          name: (la && la.name) || names[code] || articleCategory(code) || code,
+          brand: o.brand || (la && la.brand) || '',
+        };
+      });
+    const noBc = items.filter(i => !i.barcode).length;
+    if (noBc) { alert(`У ${noBc} пар нет баркода в каталоге — синхронизируй каталог WB в «Этикетках».`); return; }
+    printLabels(items);
+  }
   // ── Убрать / отменить заказ ─────────────────────────────────────────────────
   async function removeFbsOrder(o) {
     if (!fbsOpen) return;
@@ -4032,6 +4058,48 @@ function SkladLedger() {
     : o.inSupply ? ['в поставке', 'var(--accent)']
     : ['новый', 'var(--ink-soft)'];
   const fbsCommAuto = Object.keys(fbsCommission).length > 0;
+  // ── Группировка станции по артикулам (строка артикула раскрывается в размеры) ──
+  const fbsQ = fbsStationSearch.trim().toLowerCase();
+  const fbsMatch = o => !fbsQ || String(o.code || '').toLowerCase().includes(fbsQ) || String(o.barcode || '').includes(fbsQ) || String(o.orderId).includes(fbsQ);
+  const fbsSortSize = (a, b) => (parseFloat(a.size) || 0) - (parseFloat(b.size) || 0) || String(a.size || '').localeCompare(String(b.size || '')) || String(a.brand || '').localeCompare(String(b.brand || ''));
+  const fbsOpenArticles = (() => {
+    if (!fbsOpen) return [];
+    const m = {};
+    fbsOpen.orders.filter(o => fbsLive(o) && fbsMatch(o)).forEach(o => {
+      if (!m[o.code]) m[o.code] = { code: o.code, total: 0, brands: new Set(), sizes: {} };
+      const a = m[o.code];
+      a.total++;
+      if (o.brand) a.brands.add(o.brand);
+      const k = `${o.size}|${o.barcode}`;
+      if (!a.sizes[k]) a.sizes[k] = { size: o.size, brand: o.brand, barcode: o.barcode, qty: 0 };
+      a.sizes[k].qty++;
+    });
+    return Object.values(m)
+      .map(a => ({ ...a, brands: [...a.brands], sizes: Object.values(a.sizes).sort(fbsSortSize) }))
+      .sort((x, y) => String(x.code).localeCompare(String(y.code), undefined, { numeric: true }));
+  })();
+  const fbsOrderArticles = (() => {
+    if (!fbsOpen) return [];
+    const m = {};
+    fbsOpen.orders.filter(fbsMatch).forEach(o => { (m[o.code] = m[o.code] || []).push(o); });
+    return Object.keys(m).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(code => {
+      const list = [...m[code]].sort(fbsSortSize);
+      return { code, list, live: list.filter(fbsLive).length, done: list.filter(o => o.done).length, cancelled: list.filter(o => o.cancelled).length };
+    });
+  })();
+  const toggleFbsArt = k => setFbsExpandedArts(p => ({ ...p, [k]: !p[k] }));
+  const fbsAllOpen = keys => keys.length > 0 && keys.every(k => fbsExpandedArts[k]);
+  const setFbsAllOpen = (keys, v) => setFbsExpandedArts(p => { const n = { ...p }; keys.forEach(k => { n[k] = v; }); return n; });
+  const fbsFilterBar = keys => /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 } },
+    /*#__PURE__*/React.createElement("input", { className: "skl-input", style: { maxWidth: 300 }, value: fbsStationSearch, onChange: e => setFbsStationSearch(e.target.value), placeholder: "Фильтр: артикул, баркод или № заказа" }),
+    fbsStationSearch && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: () => setFbsStationSearch('') }, "Сбросить"),
+    /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: () => setFbsAllOpen(keys, !fbsAllOpen(keys)) }, fbsAllOpen(keys) ? "Свернуть все" : "Развернуть все"));
+  const fbsArtHead = (open, onClick, code, info, right) => /*#__PURE__*/React.createElement("div", {
+    onClick, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', cursor: 'pointer', background: open ? 'var(--card-2)' : 'transparent', flexWrap: 'wrap' }
+  }, /*#__PURE__*/React.createElement(open ? ChevronDown : ChevronRight, { size: 16 }),
+    /*#__PURE__*/React.createElement("span", { className: "skl-mono", style: { fontSize: 16, fontWeight: 700, color: 'var(--accent)', minWidth: 110 } }, code),
+    /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, info),
+    /*#__PURE__*/React.createElement("div", { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 } }, right));
   const fbsStationContent = fbsOpen && /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement(Section, { title: `Станция сборки · ${fbsOpen.name}`, icon: /*#__PURE__*/React.createElement(Printer, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 } },
@@ -4099,44 +4167,63 @@ function SkladLedger() {
           ? "Комиссия — из тарифов WB по категории."
           : /*#__PURE__*/React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 6 } }, "Тарифы WB недоступны, комиссия FBS, %:",
               /*#__PURE__*/React.createElement("input", { className: "skl-input", type: "number", min: "0", max: "100", step: "0.5", style: { width: 80 }, value: fbsCommPct, onChange: e => setFbsCommPctSafe(e.target.value) }))),
-      /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto', maxHeight: 480, overflowY: 'auto' } },
-        /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
-          /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left' } },
-            ['Артикул', 'Размер', 'Бренд', 'Баркод (EAN)', 'Заказ', 'Цена', 'Статус', 'Штраф при отмене', ''].map((t, i) => /*#__PURE__*/React.createElement("th", { key: i, style: fbsTh }, t)))),
-          /*#__PURE__*/React.createElement("tbody", null, fbsOrderRows.map(o => {
-            const [st, stc] = fbsStatusOf(o);
-            const f = fbsFine(o);
-            return /*#__PURE__*/React.createElement("tr", { key: o.orderId, style: { borderTop: '1px solid var(--line)', opacity: o.cancelled ? 0.55 : 1 } },
-              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, o.code)),
-              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, o.size || '—'),
-              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, o.brand || '—'),
-              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, o.barcode || '—'),
-              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' }, className: "skl-mono" }, o.orderId),
-              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, f.price ? `${f.price.toLocaleString('ru-RU')} ₽` : '—'),
-              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: stc, fontWeight: 600 } }, st),
-              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" },
-                o.cancelled ? (o.cancelFine ? `≈ ${o.cancelFine} ₽` : '—') : o.done ? '—' : `≈ ${f.fine.toLocaleString('ru-RU')} ₽ (${f.pct}%)`),
-              /*#__PURE__*/React.createElement("td", { style: { padding: '5px 10px', whiteSpace: 'nowrap' } },
-                !o.done && !(o.inSupply && !o.cancelled) && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px' }, disabled: fbsWorking, onClick: () => removeFbsOrder(o) }, "Убрать"),
-                !o.done && !o.cancelled && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px', color: 'var(--negative)', marginLeft: 6 }, disabled: fbsWorking, onClick: () => cancelFbsOrder(o) }, "Отменить")));
-          }))))),
+      fbsFilterBar(fbsOrderArticles.map(g => 'o:' + g.code)),
+      fbsOrderArticles.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "По фильтру ничего не найдено.")
+        : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+            fbsOrderArticles.map(g => {
+              const k = 'o:' + g.code;
+              const open = !!fbsExpandedArts[k];
+              return /*#__PURE__*/React.createElement("div", { key: k, style: { border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' } },
+                fbsArtHead(open, () => toggleFbsArt(k), g.code,
+                  `${g.list.length} зак. · осталось ${g.live} · собрано ${g.done}${g.cancelled ? ` · отменено ${g.cancelled}` : ''}`, null),
+                open && /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto' } },
+                  /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
+                    /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left', background: 'var(--card-2)' } },
+                      ['Размер', 'Бренд', 'Баркод (EAN)', 'Заказ', 'Цена', 'Статус', 'Штраф при отмене', ''].map((t, i) => /*#__PURE__*/React.createElement("th", { key: i, style: fbsTh }, t)))),
+                    /*#__PURE__*/React.createElement("tbody", null, g.list.map(o => {
+                      const [st, stc] = fbsStatusOf(o);
+                      const f = fbsFine(o);
+                      return /*#__PURE__*/React.createElement("tr", { key: o.orderId, style: { borderTop: '1px solid var(--line)', opacity: o.cancelled ? 0.55 : 1 } },
+                        /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontSize: 15, fontWeight: 700 }, className: "skl-mono" }, o.size || '—'),
+                        /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, o.brand || '—'),
+                        /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, o.barcode || '—'),
+                        /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' }, className: "skl-mono" }, o.orderId),
+                        /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, f.price ? `${f.price.toLocaleString('ru-RU')} ₽` : '—'),
+                        /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: stc, fontWeight: 600 } }, st),
+                        /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" },
+                          o.cancelled ? (o.cancelFine ? `≈ ${o.cancelFine} ₽` : '—') : o.done ? '—' : `≈ ${f.fine.toLocaleString('ru-RU')} ₽ (${f.pct}%)`),
+                        /*#__PURE__*/React.createElement("td", { style: { padding: '5px 10px', whiteSpace: 'nowrap', textAlign: 'right' } },
+                          !o.done && !(o.inSupply && !o.cancelled) && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px' }, disabled: fbsWorking, onClick: () => removeFbsOrder(o) }, "Убрать"),
+                          !o.done && !o.cancelled && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px', color: 'var(--negative)', marginLeft: 6 }, disabled: fbsWorking, onClick: () => cancelFbsOrder(o) }, "Отменить")));
+                    })))));
+            }))),
     /*#__PURE__*/React.createElement(Section, { title: `Осталось собрать (${fbsOpenLeft})`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
-      fbsOpenGroups.length === 0
-        ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--positive)', fontSize: 14, fontWeight: 600 } }, "Всё собрано ✓")
-        : /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto' } },
-            /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
-              /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left' } },
-                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Артикул"),
-                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Размер"),
-                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Бренд"),
-                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Баркод (EAN)"),
-                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Осталось"))),
-              /*#__PURE__*/React.createElement("tbody", null, fbsOpenGroups.map((g, i) => /*#__PURE__*/React.createElement("tr", { key: i, style: { borderTop: '1px solid var(--line)' } },
-                /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, g.code)),
-                /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, g.size || '—'),
-                /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, g.brand || '—'),
-                /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontSize: 14, letterSpacing: '0.04em' }, className: "skl-mono" }, g.barcode || '—'),
-                /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontWeight: 700 }, className: "skl-mono" }, g.qty))))))));
+      fbsFilterBar(fbsOpenArticles.map(a => a.code)),
+      fbsOpenArticles.length === 0
+        ? /*#__PURE__*/React.createElement("div", { style: { color: fbsOpenLeft === 0 ? 'var(--positive)' : 'var(--ink-soft)', fontSize: 14, fontWeight: 600 } }, fbsOpenLeft === 0 ? "Всё собрано ✓" : "По фильтру ничего не найдено.")
+        : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+            fbsOpenArticles.map(a => {
+              const open = !!fbsExpandedArts[a.code];
+              return /*#__PURE__*/React.createElement("div", { key: a.code, style: { border: '1px solid var(--line)', borderRadius: 10, overflow: 'hidden' } },
+                fbsArtHead(open, () => toggleFbsArt(a.code), a.code, `${a.sizes.length} разм. · ${a.brands.join(', ') || '—'}`, [
+                  /*#__PURE__*/React.createElement("span", { key: 'n', style: { fontWeight: 700, fontSize: 15 } }, a.total, " пар"),
+                  /*#__PURE__*/React.createElement("button", { key: 'p', className: "skl-btn skl-btn-ghost", style: { padding: '5px 10px' }, disabled: generatingLabels,
+                    onClick: e => { e.stopPropagation(); printFbsArticleLabels(a.code); } },
+                    /*#__PURE__*/React.createElement(Printer, { size: 13 }), ` Этикетки на артикул (${a.total})`)]),
+                open && /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
+                  /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left', background: 'var(--card-2)' } },
+                    ['Размер', 'Бренд', 'Баркод (EAN)', 'Осталось', ''].map((t, i) => /*#__PURE__*/React.createElement("th", { key: i, style: fbsTh }, t)))),
+                  /*#__PURE__*/React.createElement("tbody", null, a.sizes.map((s, i) => /*#__PURE__*/React.createElement("tr", { key: i, style: { borderTop: '1px solid var(--line)' } },
+                    /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontSize: 16, fontWeight: 700 }, className: "skl-mono" }, s.size || '—'),
+                    /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, s.brand || '—'),
+                    /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontSize: 14, letterSpacing: '0.04em' }, className: "skl-mono" }, s.barcode || '—'),
+                    /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontWeight: 700, fontSize: 15 }, className: "skl-mono" }, s.qty),
+                    /*#__PURE__*/React.createElement("td", { style: { padding: '5px 10px', textAlign: 'right' } },
+                      /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px' }, disabled: generatingLabels, title: 'Этикетки только на этот размер',
+                        onClick: () => printFbsArticleLabels(a.code, s.barcode) },
+                        /*#__PURE__*/React.createElement(Printer, { size: 12 }), ` ${s.qty}`)))))));
+            }))));
   const fbsContent = fbsOpen ? fbsStationContent : /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement(Section, { title: "Сборочные задания FBS", icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
