@@ -3549,8 +3549,9 @@ function SkladLedger() {
     if (!fbsOpen) return [];
     const m = {};
     fbsOpen.orders.filter(o => !o.done).forEach(o => {
-      const k = `${o.code}|${o.size}`;
-      if (!m[k]) m[k] = { code: o.code, size: o.size, brand: o.brand, qty: 0 };
+      // Группа = конкретный баркод: разные бренды одного артикула не смешиваются.
+      const k = `${o.code}|${o.size}|${o.barcode}`;
+      if (!m[k]) m[k] = { code: o.code, size: o.size, brand: o.brand, barcode: o.barcode, qty: 0 };
       m[k].qty += 1;
     });
     return Object.values(m).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }) || (Number(a.size) || 0) - (Number(b.size) || 0));
@@ -3572,6 +3573,7 @@ function SkladLedger() {
         }, l))),
       fbsCurOrder && /*#__PURE__*/React.createElement("div", { className: "skl-card", style: { marginBottom: 12, borderColor: 'var(--accent)' } },
         /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 28, fontWeight: 700 } }, fbsCurOrder.code, "  ·  р. ", fbsCurOrder.size || '?'),
+        /*#__PURE__*/React.createElement("div", { className: "skl-mono", style: { fontSize: 18, marginTop: 4, letterSpacing: '0.05em' } }, "EAN ", fbsCurOrder.barcode || '—'),
         /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)', marginTop: 4 } },
           `${fbsCurOrder.brand || ''} · заказ ${fbsCurOrder.orderId}${fbsCurOrder.stickerParts ? ' · стикер ' + fbsCurOrder.stickerParts : ''}`)),
       /*#__PURE__*/React.createElement("input", {
@@ -3600,11 +3602,13 @@ function SkladLedger() {
                 /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Артикул"),
                 /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Размер"),
                 /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Бренд"),
+                /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Баркод (EAN)"),
                 /*#__PURE__*/React.createElement("th", { style: fbsTh }, "Осталось"))),
               /*#__PURE__*/React.createElement("tbody", null, fbsOpenGroups.map((g, i) => /*#__PURE__*/React.createElement("tr", { key: i, style: { borderTop: '1px solid var(--line)' } },
                 /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, g.code)),
                 /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, g.size || '—'),
                 /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, g.brand || '—'),
+                /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontSize: 14, letterSpacing: '0.04em' }, className: "skl-mono" }, g.barcode || '—'),
                 /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', fontWeight: 700 }, className: "skl-mono" }, g.qty))))))));
   const fbsContent = fbsOpen ? fbsStationContent : /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement(Section, { title: "Сборочные задания FBS", icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
