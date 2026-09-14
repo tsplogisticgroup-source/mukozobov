@@ -69,6 +69,15 @@ export default {
           const ids = (url.searchParams.get('ids') || '').split(',').map(s => Number(s.trim())).filter(Boolean);
           return await proxy(`${MP}/api/v3/orders/status`, 'POST', mp, JSON.stringify({ orders: ids }));
         }
+        // Отмена сборочного задания продавцом (WB берёт штраф — см. правила WB).
+        const mCancel = path.match(/^\/fbs\/orders\/([^/]+)\/cancel$/);
+        if (mCancel && request.method === 'PATCH') {
+          return await proxy(`${MP}/api/v3/orders/${mCancel[1]}/cancel`, 'PATCH', mp);
+        }
+        // Комиссии WB по предметам (для расчёта штрафа за отмену). Нужен доступ «Тарифы».
+        if (path === '/fbs/commission' && request.method === 'GET') {
+          return await proxy('https://common-api.wildberries.ru/api/v1/tariffs/commission?locale=ru', 'GET', mp);
+        }
         // Привязка кода маркировки «Честный Знак» (КИЗ/sgtin) к заказу.
         const mSgtin = path.match(/^\/fbs\/orders\/([^/]+)\/sgtin$/);
         if (mSgtin && request.method === 'PUT') {

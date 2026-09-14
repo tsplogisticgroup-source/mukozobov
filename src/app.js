@@ -296,10 +296,128 @@ const KEY_GRIDS = 'sklad:grids';
 const KEY_BRANDS = 'sklad:brands'; // code -> присвоенный бренд артикула
 const KEY_FBS_ASSIGN = 'sklad:fbs_assignments'; // индекс заданий на сборку FBS
 const FBS_ASSIGN_PREFIX = 'sklad:fbs_assignment:'; // детали задания (по одному ключу на задание)
+const KEY_FBS_GTIN = 'sklad:fbs_gtin_map'; // баркод WB → GTIN Честного Знака (выученные соответствия)
+const KEY_FBS_KIZ_USED = 'sklad:fbs_kiz_used'; // КИЗ (01+GTIN+21+серийный) → заказ, чтобы не использовать дважды
 // Сканер в режиме клавиатуры при РУССКОЙ раскладке печатает кириллицу вместо латиницы
 // (Честный Знак содержит буквы и символы). Переводим обратно по позиции клавиш.
 const FBS_RU = 'ёйцукенгшщзхъфывапролджэячсмитьбю.ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,"№;:?';
 const FBS_EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&";
+// ── Честный Знак (обувь): 01 + GTIN(14) + 21 + серийный(13) [+ 91 ключ + 92 криптохвост] ──
+// Разбор кода. Скобки «(01)», символ GS и префикс символики сканера («]d2») убираем.
+function parseKiz(raw) {
+  const s = String(raw || '').replace(/\x1d/g, '').replace(/\((\d{2,4})\)/g, '$1').replace(/^\][A-Za-z]\d/, '').trim();
+  if (!/^01\d{14}21/.test(s) || s.length < 31) return null;
+  return { gtin: s.slice(2, 16), serial: s.slice(18, 31), key: s.slice(0, 31), full: s };
+}
+// Контрольная цифра GTIN-14 (mod 10). Неверная — код повреждён или не настоящий.
+function gtinValid(g) {
+  if (!/^\d{14}$/.test(g)) return false;
+  const d = g.split('').map(Number);
+  const check = d.pop();
+  let sum = 0;
+  d.reverse().forEach((x, i) => { sum += x * (i % 2 === 0 ? 3 : 1); });
+  return (10 - sum % 10) % 10 === check;
+}
+// ── PDF формата A4 с кириллицей: рисуем страницы на canvas и кладём картинками ──
+// (стандартные шрифты jsPDF кириллицу не умеют). blocks: h1/h2/p/table/space.
+async function renderA4Pdf(blocks, footer) {
+  const { jsPDF } = window.jspdf;
+  const W = 1654, H = 2339, M = 90; // A4 при 200 dpi
+  const pages = [];
+  let ctx, y;
+  const newPage = () => {
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    ctx.textBaseline = 'alphabetic';
+    pages.push(c); y = M;
+  };
+  const font = (px, bold) => { ctx.font = `${bold ? 'bold ' : ''}${px}px Arial, sans-serif`; };
+  const wrap = (text, maxW) => {
+    const out = [];
+    String(text).split('\n').forEach(par => {
+      let line = '';
+      par.split(' ').forEach(w => {
+        const t = line ? line + ' ' + w : w;
+        if (ctx.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t;
+      });
+      out.push(line);
+    });
+    return out;
+  };
+  const ensure = h => { if (y + h > H - M - 40) newPage(); };
+  newPage();
+  for (const b of blocks) {
+    if (b.type === 'space') { y += b.h || 20; continue; }
+    if (b.type === 'h1' || b.type === 'h2' || b.type === 'p') {
+      const px = b.type === 'h1' ? 46 : b.type === 'h2' ? 34 : (b.size || 27);
+      font(px, b.type !== 'p' || b.bold);
+      const lines = wrap(b.text, W - 2 * M - (b.indent || 0));
+      const lh = px * 1.35;
+      if (b.type === 'h2') { ensure(lh * 2); y += 14; }
+      for (const ln of lines) {
+        ensure(lh);
+        if (b.bg) { ctx.fillStyle = b.bg; ctx.fillRect(M, y, W - 2 * M, lh + 6); }
+        ctx.fillStyle = b.color || '#000';
+        ctx.fillText(ln, M + (b.indent || 0), y + px);
+        y += lh;
+      }
+      y += b.type === 'h1' ? 14 : 8;
+      continue;
+    }
+    if (b.type === 'table') {
+      const cols = b.columns;
+      const tw = W - 2 * M;
+      const px = b.size || 26, rh = b.rowH || 50;
+      const xs = []; let acc = M;
+      cols.forEach(c => { xs.push(acc); acc += c.w * tw; });
+      const header = () => {
+        ensure(rh);
+        ctx.fillStyle = '#e8e8e8'; ctx.fillRect(M, y, tw, rh);
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 2; ctx.strokeRect(M, y, tw, rh);
+        font(px, true); ctx.fillStyle = '#000';
+        cols.forEach((c, i) => ctx.fillText(c.title, xs[i] + 10, y + rh / 2 + px * 0.36));
+        y += rh;
+      };
+      header();
+      b.rows.forEach(r => {
+        if (y + rh > H - M - 40) { newPage(); header(); }
+        if (r.sep) { ctx.strokeStyle = '#000'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(M, y); ctx.lineTo(M + tw, y); ctx.stroke(); }
+        if (r.bg) { ctx.fillStyle = r.bg; ctx.fillRect(M, y, tw, rh); }
+        ctx.strokeStyle = '#999'; ctx.lineWidth = 1; ctx.strokeRect(M, y, tw, rh);
+        r.cells.forEach((v, i) => {
+          const c = cols[i];
+          font(c.size || px, c.bold || r.bold);
+          ctx.fillStyle = '#000';
+          let t = String(v == null ? '' : v);
+          const maxW = c.w * tw - 20;
+          while (t.length > 1 && ctx.measureText(t).width > maxW) t = t.slice(0, -1);
+          if (c.box) { if (!r.bold) { ctx.lineWidth = 3; ctx.strokeStyle = '#000'; ctx.strokeRect(xs[i] + (c.w * tw - 34) / 2, y + (rh - 34) / 2, 34, 34); } return; }
+          const tx = c.align === 'right' ? xs[i] + c.w * tw - 10 - ctx.measureText(t).width : xs[i] + 10;
+          ctx.fillText(t, tx, y + rh / 2 + (c.size || px) * 0.36);
+        });
+        y += rh;
+      });
+      y += 20;
+    }
+  }
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  pages.forEach((c, i) => {
+    const x = c.getContext('2d');
+    x.font = '22px Arial, sans-serif'; x.fillStyle = '#555';
+    const f = `${footer || ''}   ·   стр. ${i + 1} из ${pages.length}`;
+    x.fillText(f, W - M - x.measureText(f).width, H - M / 2);
+    if (i > 0) doc.addPage('a4', 'portrait');
+    doc.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, 210, 297);
+  });
+  return doc;
+}
+// Открыть PDF в новой вкладке (просмотр онлайн / печать); если вкладку заблокировали — скачать.
+function openPdf(doc, filename) {
+  const url = doc.output('bloburl');
+  const w = window.open(url, '_blank');
+  if (!w) doc.save(filename);
+}
 function fixKbLayout(s) {
   if (!/[а-яё]/i.test(s)) return s;
   let out = '';
@@ -816,6 +934,12 @@ function SkladLedger() {
   const [fbsWorking, setFbsWorking] = useState(false);
   const [fbsPrintImg, setFbsPrintImg] = useState(null); // {src, n} — стикер на печать
   const [fbsTest, setFbsTest] = useState(false); // тестовый режим: без WB и без сохранения
+  const [fbsGtinMap, setFbsGtinMap] = useState({}); // баркод WB → GTIN из Честного Знака (обучается)
+  const [fbsOverrideKiz, setFbsOverrideKiz] = useState(''); // КИЗ, принятый старшим несмотря на несовпадение GTIN
+  const [fbsGtinConflict, setFbsGtinConflict] = useState(''); // КИЗ, упавший на проверке GTIN (для кнопки старшего)
+  const [fbsShowOrders, setFbsShowOrders] = useState(false); // таблица «Заказы в задании»
+  const [fbsCommission, setFbsCommission] = useState({}); // предмет → комиссия FBS, %
+  const [fbsCommPct, setFbsCommPct] = useState(() => { try { return Number(localStorage.getItem('fbs_comm_pct')) || 25; } catch (_) { return 25; } });
   const fbsScanRef = useRef(null);
   const [labelProgress, setLabelProgress] = useState('');
   const [labelSelected, setLabelSelected] = useState([]);
@@ -2050,7 +2174,8 @@ function SkladLedger() {
           barcode: sku, size: bx ? bx.size : '', brand: bx ? bx.brand : '',
           nmId: o.nmId, chrtId: o.chrtId, createdAt: o.createdAt,
           warehouseId: o.warehouseId, offices: o.offices || [],
-          price: (o.convertedPrice || o.price || 0) / 100
+          // Цена в рублях (converted* — всегда в RUB, в копейках); final — после скидок.
+          price: (o.convertedFinalPrice || o.convertedPrice || o.finalPrice || o.price || 0) / 100
         };
       });
       setFbsOrders(orders);
@@ -2162,7 +2287,7 @@ function SkladLedger() {
     try {
       const id = uid();
       const name = fbsCreateName.trim() || `Задание ${fbsAssignments.length + 1}`;
-      const orders = base.map(o => ({ orderId: o.id, rid: o.rid, code: o.code, article: o.article, size: o.size, barcode: o.barcode, brand: o.brand, nmId: o.nmId, chrtId: o.chrtId, done: false, sgtin: '' }));
+      const orders = base.map(o => ({ orderId: o.id, rid: o.rid, code: o.code, article: o.article, size: o.size, barcode: o.barcode, brand: o.brand, nmId: o.nmId, chrtId: o.chrtId, price: o.price || 0, category: articleCategory(o.code), createdAt: o.createdAt, done: false, sgtin: '' }));
       await window.storage.set(FBS_ASSIGN_PREFIX + id, JSON.stringify({ id, name, createdAt: new Date().toISOString(), orders }));
       const entry = { id, name, createdAt: new Date().toISOString(), orderIds: base.map(o => o.id), total: base.length, done: 0 };
       await persist(KEY_FBS_ASSIGN, [entry, ...fbsAssignments], setFbsAssignments);
@@ -2207,32 +2332,42 @@ function SkladLedger() {
   function focusFbsScan() {
     setTimeout(() => { if (fbsScanRef.current) fbsScanRef.current.focus(); }, 30);
   }
+  // Чтение ключа из базы с запасным значением.
+  async function kvGet(key, def) {
+    try { const r = await window.storage.get(key, true); return r ? JSON.parse(r.value) : def; } catch (_) { return def; }
+  }
   async function openFbsAssignment(a) {
     try {
       const r = await window.storage.get(FBS_ASSIGN_PREFIX + a.id, true);
       if (!r) { alert('Задание не найдено (возможно, удалено).'); return; }
       setFbsOpen(JSON.parse(r.value));
-      setFbsStep('ean'); setFbsCurId(null); setFbsScan('');
+      setFbsStep('ean'); setFbsCurId(null); setFbsScan(''); setFbsGtinConflict('');
       setFbsMsg({ type: 'info', text: 'Отсканируй EAN товара.' });
+      kvGet(KEY_FBS_GTIN, {}).then(m => setFbsGtinMap(m && typeof m === 'object' ? m : {}));
+      if (!Object.keys(fbsCommission).length) loadFbsCommission();
       focusFbsScan();
     } catch (e) { alert('Не удалось открыть задание: ' + (e.message || e)); }
   }
   function closeFbsStation() {
     setFbsOpen(null); setFbsCurId(null); setFbsStep('ean'); setFbsMsg(null); setFbsTest(false);
+    setFbsShowOrders(false); setFbsGtinConflict('');
     reloadFbsAssignments();
   }
   const fbsPatchOrder = (d, id, patch) => ({ ...d, orders: d.orders.map(o => o.orderId === id ? { ...o, ...patch } : o) });
-  // Сохраняем задание (своим ключом — станции не мешают друг другу) и счётчик «собрано» в индексе.
+  const fbsLive = o => !o.done && !o.cancelled; // заказ ещё нужно собрать
+  // Сохраняем задание (своим ключом — станции не мешают друг другу) и счётчики в индексе.
   async function saveFbsDetail(d) {
     setFbsOpen(d);
     await window.storage.set(FBS_ASSIGN_PREFIX + d.id, JSON.stringify(d));
     const done = d.orders.filter(o => o.done).length;
+    const cancelled = d.orders.filter(o => o.cancelled).length;
+    const total = d.orders.length;
     const known = fbsAssignments.find(x => x.id === d.id);
-    if (known && known.done === done) return;
+    if (known && known.done === done && (known.cancelled || 0) === cancelled && known.total === total) return;
     try { // перечитываем индекс перед записью — чтобы не затереть счётчики других станций
-      const r = await window.storage.get(KEY_FBS_ASSIGN, true);
-      const cur = r ? JSON.parse(r.value) : [];
-      const next = (Array.isArray(cur) ? cur : []).map(x => x.id === d.id ? { ...x, done } : x);
+      const cur = await kvGet(KEY_FBS_ASSIGN, []);
+      const next = (Array.isArray(cur) ? cur : []).map(x => x.id === d.id
+        ? { ...x, done, cancelled, total, orderIds: d.orders.map(o => o.orderId) } : x);
       await persist(KEY_FBS_ASSIGN, next, setFbsAssignments);
     } catch (_) {}
   }
@@ -2260,44 +2395,96 @@ function SkladLedger() {
     window.addEventListener('afterprint', after);
     return () => window.removeEventListener('afterprint', after);
   }, []);
+  // Запоминаем «баркод WB → GTIN» после успешной сборки (для проверки пересорта).
+  async function learnFbsGtin(barcode, gtin, force) {
+    if (!barcode || !gtin) return;
+    if (fbsGtinMap[barcode] === gtin) return;
+    if (fbsGtinMap[barcode] && !force) return;
+    const m = await kvGet(KEY_FBS_GTIN, {});
+    const next = { ...(m && typeof m === 'object' ? m : {}), [barcode]: gtin };
+    setFbsGtinMap(next);
+    try { await window.storage.set(KEY_FBS_GTIN, JSON.stringify(next)); } catch (_) {}
+  }
   async function finishFbsOrder(d, cur) {
     const nd = fbsPatchOrder(d, cur.orderId, { done: true, doneAt: new Date().toISOString() });
     await saveFbsDetail(nd);
+    learnFbsGtin(cur.barcode, cur.gtin, cur.kizOverride);
     setFbsCurId(null); setFbsStep('ean');
-    const left = nd.orders.filter(o => !o.done).length;
+    const left = nd.orders.filter(fbsLive).length;
     setFbsMsg({ type: 'ok', text: left ? `✓ ${cur.code} р.${cur.size || '?'} собран. Осталось ${left}. Сканируй следующий EAN.` : '✓ Задание собрано полностью!' });
     focusFbsScan();
   }
+  // ── Проверка Честного Знака ДО отправки в WB ────────────────────────────────
+  async function checkFbsKiz(value, cur, d, opts) {
+    if (/^\d{8,14}$/.test(value)) return { ok: false, kind: 'ean', text: 'Это обычный штрихкод (EAN), а нужен Честный Знак — квадратный код Data Matrix.' };
+    const k = parseKiz(value);
+    if (!k) return { ok: false, kind: 'format', text: 'Это не код Честного Знака (он начинается с 01 + 14 цифр + 21…). Отсканирован другой код (QR, стикер) или код считался не полностью — пересканируй Data Matrix.' };
+    if (!gtinValid(k.gtin)) return { ok: false, kind: 'checksum', text: `Код Честного Знака повреждён (неверная контрольная цифра GTIN ${k.gtin}). Пересканируй; если ошибка повторится — отложи пару и позови старшего.` };
+    const dupLocal = d.orders.find(o => o.orderId !== cur.orderId && o.kizKey === k.key);
+    if (dupLocal) return { ok: false, kind: 'dup', text: `Этот Честный Знак уже привязан к заказу ${dupLocal.orderId} (${dupLocal.code} р.${dupLocal.size || '?'}). Один код — одна пара! Возьми пару с другим кодом и позови старшего.` };
+    if (!opts.test) {
+      const used = await kvGet(KEY_FBS_KIZ_USED + ':' + k.gtin, {});
+      const u = used && used[k.key];
+      if (u && String(u.orderId) !== String(cur.orderId)) return { ok: false, kind: 'dup', text: `Этот Честный Знак уже использован в заказе ${u.orderId} (${u.code || ''} р.${u.size || '?'}, ${fmtDate(String(u.at || '').slice(0, 10))}). Повторно нельзя — возьми пару с другим кодом и позови старшего.` };
+    }
+    if (opts.override !== value) {
+      const bc = String(cur.barcode || '');
+      const direct = /^\d{13}$/.test(bc) && k.gtin === '0' + bc; // баркод WB = GTIN — точное совпадение
+      if (!direct) {
+        const otherDirect = Object.keys(barcodeIndex).find(b => b !== bc && /^\d{13}$/.test(b) && k.gtin === '0' + b);
+        const otherLearned = Object.keys(fbsGtinMap).find(b => b !== bc && fbsGtinMap[b] === k.gtin);
+        const other = otherDirect || otherLearned;
+        if (other) {
+          const ob = barcodeIndex[other];
+          return { ok: false, kind: 'gtin', kiz: k, text: `Честный Знак от ДРУГОГО товара: ${ob ? `${ob.code} р.${ob.size} (${ob.brand})` : 'баркод ' + other}, а собираем ${cur.code} р.${cur.size || '?'}. Проверь артикул и размер на коробке, возьми правильную пару.` };
+        }
+        const learned = fbsGtinMap[bc];
+        if (learned && learned !== k.gtin) return { ok: false, kind: 'gtin', kiz: k, text: `GTIN ${k.gtin} не совпадает с этим товаром (для ${cur.code} р.${cur.size || '?'} раньше принимали GTIN ${learned}). Похоже на пересорт — проверь размер и артикул на коробке.` };
+      }
+    }
+    return { ok: true, kiz: k };
+  }
+  // Подсказки для «чужих» сканов на шаге EAN.
+  function fbsEanMiss(value, d) {
+    if (parseKiz(value)) return 'Это Честный Знак. Сначала отсканируй обычный штрихкод товара (EAN).';
+    const st = d.orders.find(o => o.stickerBarcode && o.stickerBarcode === value);
+    if (st) return `Это стикер заказа ${st.orderId}. Сначала отсканируй EAN товара.`;
+    const same = d.orders.filter(o => o.barcode === value);
+    if (same.length && same.every(o => o.cancelled || o.done) && same.some(o => o.cancelled) && !same.some(o => o.done && !o.cancelled))
+      return `EAN ${value}: заказ(ы) на этот товар отменены — пару НЕ собирать, верни на полку.`;
+    if (same.length) return `EAN ${value}: все заказы с этим товаром уже собраны — это лишняя пара, верни на полку.`;
+    const bx = barcodeIndex[value];
+    if (bx) return `EAN ${value} — это ${bx.code} р.${bx.size} (${bx.brand}), но в этом задании его нет. Отложи пару в «чужие» и собирай по листу сборки.`;
+    return `EAN ${value} не найден ни в задании, ни в каталоге WB. Проверь, что сканируешь штрихкод WB (наклейка с артикулом и размером), а не заводской. При повторе — к старшему.`;
+  }
   // ── Тестовый режим: весь поток без WB и без сохранения ─────────────────────
-  const FBS_TEST_KIZ = '0104600000000000215TESTKIZ00001';
+  const FBS_TEST_KIZ = '0104600000000008215TESTKIZ00001'; // формально корректный (GTIN с верной контрольной цифрой)
   function fbsTestStickerCode(orderId) { return '990' + String(orderId); } // только цифры — не зависит от раскладки
   async function printFbsTestSticker(cur) {
     const src = await renderLabelPNG('ТЕСТОВЫЙ СТИКЕР FBS', cur.code, cur.size || '?', fbsTestStickerCode(cur.orderId), '', 'ТЕСТ · НЕ ДЛЯ ОТГРУЗКИ');
     setFbsPrintImg({ src, n: Date.now() });
   }
-  async function handleFbsTestScan(value) {
+  async function handleFbsTestScan(value, opt) {
     let d = fbsOpen;
     const patch = (id, p) => { d = fbsPatchOrder(d, id, p); setFbsOpen(d); };
     if (fbsStep === 'ean') {
-      const cur = d.orders.find(o => o.barcode === value && !o.done);
-      if (!cur) {
-        const doneSame = d.orders.some(o => o.barcode === value);
-        setFbsMsg({ type: 'err', text: doneSame ? `ТЕСТ · EAN ${value}: все заказы с этим товаром уже собраны.` : `ТЕСТ · EAN ${value}: такого товара нет в задании.` });
-        return;
-      }
+      const cur = d.orders.find(o => o.barcode === value && fbsLive(o));
+      if (!cur) { setFbsMsg({ type: 'err', text: 'ТЕСТ · ' + fbsEanMiss(value, d) }); return; }
       setFbsCurId(cur.orderId);
       setFbsStep('kiz');
-      setFbsMsg({ type: 'info', text: `ТЕСТ · ${cur.code} р.${cur.size || '?'} — отсканируй любой Data Matrix или нажми «Следующий шаг».` });
+      setFbsMsg({ type: 'info', text: `ТЕСТ · ${cur.code} р.${cur.size || '?'} — отсканируй Data Matrix или нажми «Следующий шаг».` });
       return;
     }
     const cur = d.orders.find(o => o.orderId === fbsCurId);
     if (!cur) { setFbsStep('ean'); setFbsMsg({ type: 'err', text: 'ТЕСТ · текущий заказ потерян — отсканируй EAN заново.' }); return; }
     if (fbsStep === 'kiz') {
-      if (/^\d{8,14}$/.test(value)) { setFbsMsg({ type: 'err', text: 'ТЕСТ · это похоже на EAN, а нужен Честный Знак (Data Matrix).' }); return; }
-      patch(cur.orderId, { sgtin: value, stickerBarcode: fbsTestStickerCode(cur.orderId), stickerParts: '' });
+      const chk = await checkFbsKiz(value, cur, d, { test: true, override: opt && opt.override });
+      if (!chk.ok) { setFbsGtinConflict(chk.kind === 'gtin' ? value : ''); setFbsMsg({ type: 'err', text: 'ТЕСТ · ' + chk.text }); return; }
+      setFbsGtinConflict('');
+      patch(cur.orderId, { sgtin: value, gtin: chk.kiz.gtin, kizKey: chk.kiz.key, stickerBarcode: fbsTestStickerCode(cur.orderId), stickerParts: '' });
       await printFbsTestSticker(cur);
       setFbsStep('sticker');
-      setFbsMsg({ type: 'ok', text: `ТЕСТ · КИЗ «${value.slice(0, 24)}${value.length > 24 ? '…' : ''}» принят (в WB НЕ отправлен). Тестовый стикер печатается — отсканируй его.` });
+      setFbsMsg({ type: 'ok', text: `ТЕСТ · Честный Знак прошёл проверки (GTIN ${chk.kiz.gtin}), в WB НЕ отправлен. Тестовый стикер печатается — отсканируй его.` });
       return;
     }
     if (fbsStep === 'sticker') {
@@ -2307,7 +2494,7 @@ function SkladLedger() {
       }
       patch(cur.orderId, { done: true });
       setFbsCurId(null); setFbsStep('ean');
-      const left = d.orders.filter(o => !o.done).length;
+      const left = d.orders.filter(fbsLive).length;
       setFbsMsg({ type: 'ok', text: `ТЕСТ · ✓ ${cur.code} р.${cur.size || '?'} собран (в WB ничего не отправлено). ${left ? 'Осталось ' + left + '.' : 'Всё собрано!'}` });
     }
   }
@@ -2315,7 +2502,7 @@ function SkladLedger() {
   function simulateFbsScan() {
     if (!fbsOpen) return;
     if (fbsStep === 'ean') {
-      const next = fbsOpen.orders.find(o => !o.done && o.barcode);
+      const next = fbsOpen.orders.find(o => fbsLive(o) && o.barcode);
       if (!next) { setFbsMsg({ type: 'info', text: 'ТЕСТ · в задании нет несобранных заказов.' }); return; }
       handleFbsScan(next.barcode);
     } else if (fbsStep === 'kiz') {
@@ -2327,24 +2514,23 @@ function SkladLedger() {
   async function toggleFbsTest() {
     if (!fbsOpen) return;
     if (fbsTest) {
-      // Выход из теста: перечитываем задание из базы — тестовый прогресс выбрасываем.
       setFbsTest(false);
-      await openFbsAssignment({ id: fbsOpen.id });
+      await openFbsAssignment({ id: fbsOpen.id }); // тестовый прогресс выбрасываем
       setFbsMsg({ type: 'info', text: 'Тестовый режим выключен. Работа с WB. Отсканируй EAN товара.' });
     } else {
       setFbsTest(true);
-      setFbsCurId(null); setFbsStep('ean');
+      setFbsCurId(null); setFbsStep('ean'); setFbsGtinConflict('');
       setFbsMsg({ type: 'info', text: 'ТЕСТОВЫЙ РЕЖИМ: WB не трогаем, прогресс не сохраняется. Отсканируй EAN или нажми «Следующий шаг».' });
       focusFbsScan();
     }
   }
-  // Главный обработчик скана. Порядок WB: заказ в поставку → КИЗ → стикер → скан стикера.
-  async function handleFbsScan(raw) {
+  // Главный обработчик скана. Порядок: проверки ЧЗ → заказ в поставку → КИЗ в WB → стикер → скан стикера.
+  async function handleFbsScan(raw, opt) {
     const value = fixKbLayout(String(raw || '').replace(/[\r\n\t]/g, '').trim());
     setFbsScan('');
     if (!value || !fbsOpen) return;
     if (fbsTest) {
-      try { await handleFbsTestScan(value); }
+      try { await handleFbsTestScan(value, opt); }
       catch (e) { console.error(e); setFbsMsg({ type: 'err', text: 'ТЕСТ · ошибка: ' + (e.message || e) }); }
       finally { focusFbsScan(); }
       return;
@@ -2354,20 +2540,17 @@ function SkladLedger() {
     setFbsWorking(true);
     try {
       if (fbsStep === 'ean') {
-        const cand = d.orders.filter(o => o.barcode === value && !o.done);
+        const cand = d.orders.filter(o => o.barcode === value && fbsLive(o));
         const cur = cand.find(o => o.inSupply) || cand[0]; // сначала — начатый, потом новый
-        if (!cur) {
-          const doneSame = d.orders.some(o => o.barcode === value);
-          setFbsMsg({ type: 'err', text: doneSame ? `EAN ${value}: все заказы с этим товаром уже собраны.` : `EAN ${value}: такого товара нет в этом задании.` });
-          return;
-        }
+        if (!cur) { setFbsMsg({ type: 'err', text: fbsEanMiss(value, d) }); return; }
         setFbsCurId(cur.orderId);
+        setFbsGtinConflict('');
         if (cur.sgtin && !cur.stickerBarcode) {
           const st = await fetchAndPrintFbsSticker(cur.orderId);
           d = fbsPatchOrder(d, cur.orderId, { stickerBarcode: st.barcode || '', stickerParts: `${st.partA || ''} ${st.partB || ''}`.trim() });
           await saveFbsDetail(d);
           setFbsStep('sticker');
-          setFbsMsg({ type: 'info', text: `${cur.code} р.${cur.size || '?'}: КИЗ уже привязан, стикер печатается. Отсканируй стикер.` });
+          setFbsMsg({ type: 'info', text: `${cur.code} р.${cur.size || '?'}: Честный Знак уже привязан, стикер печатается. Отсканируй стикер.` });
         } else if (cur.sgtin) {
           setFbsStep('sticker');
           setFbsMsg({ type: 'info', text: `${cur.code} р.${cur.size || '?'}: стикер уже напечатан. Отсканируй стикер (или «Печать ещё раз»).` });
@@ -2379,8 +2562,11 @@ function SkladLedger() {
       }
       const cur = d.orders.find(o => o.orderId === fbsCurId);
       if (!cur) { setFbsStep('ean'); setFbsMsg({ type: 'err', text: 'Текущий заказ потерян — отсканируй EAN заново.' }); return; }
+      if (cur.cancelled) { setFbsCurId(null); setFbsStep('ean'); setFbsMsg({ type: 'err', text: `Заказ ${cur.orderId} отменён — пару не собирать, верни на полку.` }); return; }
       if (fbsStep === 'kiz') {
-        if (/^\d{8,14}$/.test(value)) { setFbsMsg({ type: 'err', text: 'Это похоже на EAN, а нужен Честный Знак (квадратный код Data Matrix).' }); return; }
+        const chk = await checkFbsKiz(value, cur, d, { override: opt && opt.override });
+        if (!chk.ok) { setFbsGtinConflict(chk.kind === 'gtin' ? value : ''); setFbsMsg({ type: 'err', text: chk.text }); return; }
+        setFbsGtinConflict('');
         d = await ensureFbsSupply(d); // 1) поставка
         if (!cur.inSupply) {           // 2) заказ в поставку → статус «на сборке»
           await wbCall(`/fbs/supplies/${encodeURIComponent(d.supplyId)}/orders/${cur.orderId}`, 'PATCH');
@@ -2388,28 +2574,40 @@ function SkladLedger() {
           await saveFbsDetail(d);
         }
         await wbCall(`/fbs/orders/${cur.orderId}/sgtin`, 'PUT', { sgtins: [value] }); // 3) КИЗ → WB
-        d = fbsPatchOrder(d, cur.orderId, { sgtin: value });
+        d = fbsPatchOrder(d, cur.orderId, { sgtin: value, gtin: chk.kiz.gtin, kizKey: chk.kiz.key, kizOverride: !!(opt && opt.override === value) });
         await saveFbsDetail(d);
+        try { // регистрируем код как использованный (ключ по GTIN — маленький)
+          const ukey = KEY_FBS_KIZ_USED + ':' + chk.kiz.gtin;
+          const used = await kvGet(ukey, {});
+          await window.storage.set(ukey, JSON.stringify({ ...(used || {}), [chk.kiz.key]: { orderId: cur.orderId, code: cur.code, size: cur.size, at: new Date().toISOString() } }));
+        } catch (_) {}
         const st = await fetchAndPrintFbsSticker(cur.orderId); // 4) стикер → печать
         d = fbsPatchOrder(d, cur.orderId, { stickerBarcode: st.barcode || '', stickerParts: `${st.partA || ''} ${st.partB || ''}`.trim() });
         await saveFbsDetail(d);
         setFbsStep('sticker');
-        setFbsMsg({ type: 'ok', text: `КИЗ принят. Стикер ${st.partA || ''} ${st.partB || ''} печатается — наклей и отсканируй его.` });
+        setFbsMsg({ type: 'ok', text: `Честный Знак принят. Стикер ${st.partA || ''} ${st.partB || ''} печатается — наклей и отсканируй его.` });
         return;
       }
       if (fbsStep === 'sticker') {
         const flat = x => String(x || '').replace(/\s/g, '');
         const ok = value === cur.stickerBarcode || flat(value) === flat(cur.stickerParts) || value === String(cur.orderId);
-        if (!ok) { setFbsMsg({ type: 'err', text: `Стикер не от этого заказа! Нужен стикер ${cur.stickerParts || cur.stickerBarcode}.` }); return; }
+        if (!ok) { setFbsMsg({ type: 'err', text: `Стикер не от этого заказа! Нужен стикер ${cur.stickerParts || cur.stickerBarcode}. Чужой стикер не клеить.` }); return; }
         await finishFbsOrder(d, cur);
       }
     } catch (e) {
       console.error(e);
-      setFbsMsg({ type: 'err', text: 'Ошибка WB: ' + (e.message || e) });
+      const m = String(e.message || e);
+      const net = /Failed to fetch|NetworkError|abort|timeout/i.test(m);
+      setFbsMsg({ type: 'err', text: net ? 'Нет связи с WB (интернет/воркер). Проверь интернет и повтори скан — ничего не потеряно.' : 'Ошибка WB: ' + m + ' — повтори скан через 10 сек; если снова — отложи пару и к старшему.' });
     } finally {
       setFbsWorking(false);
       focusFbsScan();
     }
+  }
+  function acceptFbsKizBySenior() {
+    if (!fbsGtinConflict) return;
+    if (!window.confirm('Только для СТАРШЕГО.\nGTIN Честного Знака не совпал с товаром. Ты лично проверил: артикул и размер на коробке и на паре совпадают с заказом?\nПринять этот код?')) return;
+    handleFbsScan(fbsGtinConflict, { override: fbsGtinConflict });
   }
   async function reprintFbsSticker() {
     if (!fbsCurId) return;
@@ -2426,7 +2624,7 @@ function SkladLedger() {
   }
   async function deliverFbsSupply() {
     if (!fbsOpen || !fbsOpen.supplyId) return;
-    const hanging = fbsOpen.orders.filter(o => o.inSupply && !o.done).length;
+    const hanging = fbsOpen.orders.filter(o => o.inSupply && !o.done && !o.cancelled).length;
     if (!window.confirm(`Передать поставку ${fbsOpen.supplyId} в доставку?${hanging ? `\nВНИМАНИЕ: ${hanging} заказ(ов) в поставке не отбиты стикером.` : ''}\nПосле этого добавлять заказы в неё будет нельзя.`)) return;
     setFbsWorking(true);
     try {
@@ -2435,6 +2633,191 @@ function SkladLedger() {
       setFbsMsg({ type: 'ok', text: `Поставка ${fbsOpen.supplyId} передана в доставку.` });
     } catch (e) { setFbsMsg({ type: 'err', text: 'Ошибка WB: ' + (e.message || e) }); }
     finally { setFbsWorking(false); }
+  }
+  // ── Убрать / отменить заказ ─────────────────────────────────────────────────
+  async function removeFbsOrder(o) {
+    if (!fbsOpen) return;
+    if (o.done) { alert('Заказ уже собран — убрать его нельзя.'); return; }
+    if (o.inSupply && !o.cancelled) { alert('Заказ уже добавлен в поставку WB — убрать из задания нельзя. Если собрать не получается — отмените заказ.'); return; }
+    if (!window.confirm(`Убрать заказ ${o.orderId} (${o.code} р.${o.size || '?'}) из задания?${o.cancelled ? '' : ' Он вернётся в свободные заказы.'}`)) return;
+    const nd = { ...fbsOpen, orders: fbsOpen.orders.filter(x => x.orderId !== o.orderId) };
+    if (fbsCurId === o.orderId) { setFbsCurId(null); setFbsStep('ean'); }
+    if (fbsTest) { setFbsOpen(nd); setFbsMsg({ type: 'info', text: `ТЕСТ · заказ ${o.orderId} убран (не сохранено).` }); return; }
+    await saveFbsDetail(nd);
+    setFbsMsg({ type: 'info', text: `Заказ ${o.orderId} убран из задания.` });
+  }
+  // Комиссия FBS по предмету из тарифов WB (если токен пускает), иначе — ручной %.
+  async function loadFbsCommission() {
+    try {
+      const data = await wbCall('/fbs/commission');
+      const m = {};
+      (data.report || []).forEach(r => { if (r.subjectName && typeof r.kgvpMarketplace === 'number') m[r.subjectName] = r.kgvpMarketplace; });
+      if (Object.keys(m).length) setFbsCommission(m);
+    } catch (_) {}
+  }
+  function setFbsCommPctSafe(v) {
+    const n = Math.max(0, Math.min(100, Number(v) || 0));
+    setFbsCommPct(n);
+    try { localStorage.setItem('fbs_comm_pct', String(n)); } catch (_) {}
+  }
+  // Штраф WB за отмену продавцом: двойная комиссия, мин. 10 ₽, макс. 10 000 ₽ за единицу.
+  function fbsFine(o) {
+    const price = Number(o.price) || Number((fbsOrders.find(x => x.id === o.orderId) || {}).price) || 0;
+    const cat = o.category || articleCategory(o.code);
+    const auto = typeof fbsCommission[cat] === 'number';
+    const pct = auto ? fbsCommission[cat] : fbsCommPct;
+    const fine = Math.round(Math.min(10000, Math.max(10, price * pct / 100 * 2)));
+    return { fine, price, pct, auto };
+  }
+  async function cancelFbsOrder(o) {
+    if (!fbsOpen || o.done || o.cancelled) return;
+    const f = fbsFine(o);
+    const calc = f.price ? `${f.price.toLocaleString('ru-RU')} ₽ × ${f.pct}% × 2 = ` : '';
+    if (!window.confirm(`Отменить заказ ${o.orderId} (${o.code} р.${o.size || '?'})?\n\nWB удержит штраф за отмену продавцом — двойную комиссию (мин. 10 ₽, макс. 10 000 ₽ за единицу).\nОриентировочно: ${calc}${f.fine.toLocaleString('ru-RU')} ₽${f.auto ? '' : ` (комиссия ${f.pct}% введена вручную)`}.\nТочная сумма — в отчёте WB.\n\nОтмену вернуть нельзя.`)) return;
+    if (fbsTest) {
+      setFbsOpen(fbsPatchOrder(fbsOpen, o.orderId, { cancelled: true, cancelFine: f.fine }));
+      if (fbsCurId === o.orderId) { setFbsCurId(null); setFbsStep('ean'); }
+      setFbsMsg({ type: 'info', text: `ТЕСТ · заказ ${o.orderId} «отменён» (в WB не отправлено). Штраф был бы ≈ ${f.fine} ₽.` });
+      return;
+    }
+    setFbsWorking(true);
+    try {
+      await wbCall(`/fbs/orders/${o.orderId}/cancel`, 'PATCH');
+      await saveFbsDetail(fbsPatchOrder(fbsOpen, o.orderId, { cancelled: true, cancelledAt: new Date().toISOString(), cancelFine: f.fine, cancelBy: 'seller' }));
+      if (fbsCurId === o.orderId) { setFbsCurId(null); setFbsStep('ean'); }
+      logAction(`FBS: отменён заказ ${o.orderId} (${o.code} р.${o.size || '?'}) — штраф ≈ ${f.fine} ₽`, {});
+      setFbsMsg({ type: 'ok', text: `Заказ ${o.orderId} отменён. Ориентировочный штраф WB ≈ ${f.fine} ₽. Верни пару на полку.` });
+    } catch (e) { setFbsMsg({ type: 'err', text: 'WB не отменил заказ: ' + (e.message || e) }); }
+    finally { setFbsWorking(false); focusFbsScan(); }
+  }
+  // Отмены со стороны покупателя/WB: сверяем статусы заказов задания.
+  async function checkFbsCancels() {
+    if (!fbsOpen || fbsTest) return;
+    const ids = fbsOpen.orders.filter(fbsLive).map(o => o.orderId);
+    if (!ids.length) { setFbsMsg({ type: 'info', text: 'Нечего проверять — всё собрано.' }); return; }
+    setFbsWorking(true);
+    try {
+      const st = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const data = await wbCall(`/fbs/orders/status?ids=${ids.slice(i, i + 200).join(',')}`);
+        (data.orders || []).forEach(x => st.push(x));
+      }
+      let nd = fbsOpen, n = 0;
+      st.forEach(x => {
+        const cancelled = x.supplierStatus === 'cancel' || /cancel|declined/i.test(String(x.wbStatus || ''));
+        if (cancelled) { nd = fbsPatchOrder(nd, x.id, { cancelled: true, cancelledAt: new Date().toISOString(), cancelBy: x.supplierStatus === 'cancel' ? 'seller' : 'buyer/wb', wbStatus: x.wbStatus }); n++; }
+      });
+      if (n) await saveFbsDetail(nd);
+      if (n && fbsCurId && nd.orders.find(o => o.orderId === fbsCurId && o.cancelled)) { setFbsCurId(null); setFbsStep('ean'); }
+      setFbsMsg({ type: n ? 'err' : 'ok', text: n ? `Отменённых заказов: ${n}. Они убраны из «Осталось собрать» — эти пары НЕ собирать.` : 'Отменённых заказов нет.' });
+    } catch (e) { setFbsMsg({ type: 'err', text: 'Не удалось проверить статусы: ' + (e.message || e) }); }
+    finally { setFbsWorking(false); focusFbsScan(); }
+  }
+  // ── Лист сборки A4 (PDF): артикул, размер, бренд, баркод — по артикулам ──────
+  async function downloadFbsPickSheet(src) {
+    let d = src && src.orders ? src : await kvGet(FBS_ASSIGN_PREFIX + (src && src.id), null);
+    if (!d) { alert('Задание не найдено.'); return; }
+    const live = d.orders.filter(fbsLive);
+    if (!live.length) { alert('В задании нечего собирать.'); return; }
+    const m = {};
+    live.forEach(o => {
+      const k = `${o.code}|${o.size}|${o.barcode}`;
+      if (!m[k]) m[k] = { code: o.code || '', size: o.size || '', brand: o.brand || '', barcode: o.barcode || '', qty: 0 };
+      m[k].qty++;
+    });
+    const groups = Object.values(m).sort((a, b) =>
+      a.code.localeCompare(b.code, undefined, { numeric: true })
+      || (parseFloat(a.size) || 0) - (parseFloat(b.size) || 0)
+      || String(a.size).localeCompare(String(b.size))
+      || a.brand.localeCompare(b.brand));
+    const rows = [];
+    let prev = null, n = 0;
+    const subtotal = code => rows.push({ cells: ['', '', `Итого ${code}`, '', '', '', groups.filter(x => x.code === code).reduce((s, x) => s + x.qty, 0)], bold: true, bg: '#efefef' });
+    groups.forEach(g => {
+      if (prev !== null && prev !== g.code) subtotal(prev);
+      rows.push({ cells: ['', ++n, g.code, g.size || '—', g.brand || '—', g.barcode || '—', g.qty], sep: prev !== null && prev !== g.code });
+      prev = g.code;
+    });
+    subtotal(prev);
+    try {
+      const doc = await renderA4Pdf([
+        { type: 'h1', text: `Лист сборки FBS — ${d.name}` },
+        { type: 'p', text: `Склад: ${FBS_WAREHOUSE_NAME} · Задание создано: ${fmtDate(String(d.createdAt).slice(0, 10))} · Напечатано: ${new Date().toLocaleString('ru-RU')}`, size: 24, color: '#333' },
+        { type: 'p', text: `Артикулов: ${new Set(groups.map(g => g.code)).size} · Позиций: ${groups.length} · Пар к сборке: ${live.length}`, size: 28, bold: true },
+        { type: 'space', h: 8 },
+        { type: 'table', size: 30, rowH: 64, columns: [
+          { title: '', w: 0.05, box: true },
+          { title: '№', w: 0.06 },
+          { title: 'Артикул', w: 0.22, bold: true, size: 33 },
+          { title: 'Размер', w: 0.10, bold: true, size: 38 },
+          { title: 'Бренд', w: 0.19 },
+          { title: 'Баркод (EAN)', w: 0.26, size: 32 },
+          { title: 'Пар', w: 0.12, bold: true, size: 38, align: 'right' },
+        ], rows },
+      ], `${d.name} · ${FBS_WAREHOUSE_NAME}`);
+      openPdf(doc, `list_sborki_${String(d.name).replace(/[^\wа-яё-]+/gi, '_')}.pdf`);
+    } catch (e) { console.error(e); alert('Не удалось собрать PDF: ' + (e.message || e)); }
+  }
+  // ── Памятка сборщика (PDF): все нестандартные ситуации и что делать ─────────
+  async function openFbsMemo() {
+    const H = t => ({ type: 'h2', text: t });
+    const S = (title, screen, todo) => [
+      { type: 'p', text: '• ' + title, bold: true, size: 31 },
+      screen ? { type: 'p', text: 'На экране: ' + screen, size: 27, color: '#8a1c1c', indent: 36 } : null,
+      { type: 'p', text: 'Что делать: ' + todo, size: 27, indent: 36 },
+      { type: 'space', h: 6 },
+    ].filter(Boolean);
+    const blocks = [
+      { type: 'h1', text: 'Памятка сборщика FBS' },
+      { type: 'p', text: `Склад ${FBS_WAREHOUSE_NAME}. Если ситуация не описана здесь или сомневаешься — остановись и позови старшего. Лучше отложить пару, чем отгрузить неправильно.`, size: 28, color: '#333' },
+      H('Нормальный порядок сборки одной пары'),
+      { type: 'p', text: '1) Скан EAN товара (штрихкод WB на коробке) → на экране крупно артикул, размер, EAN. Сверь с коробкой.', size: 28 },
+      { type: 'p', text: '2) Скан Честного Знака (квадратный Data Matrix) → система проверяет код, ставит заказ в поставку WB, привязывает код, печатает стикер.', size: 28 },
+      { type: 'p', text: '3) Наклей стикер на упаковку и отсканируй его → «✓ собран». Поле само готово к следующей паре.', size: 28 },
+      { type: 'p', text: 'Перед сменой и каждые 2 часа: кнопка «Проверить отмены в WB». Печатай лист сборки A4 и отмечай собранное галочкой.', size: 28, bold: true },
+
+      H('Шаг 1 — скан EAN'),
+      ...S('Товара нет в задании', '«EAN … — это <артикул> р.<размер>, но в этом задании его нет»', 'Отложи пару в «чужие». Собирай строго по листу сборки. Возможно, пара из другого задания — не бери чужое.'),
+      ...S('Штрихкода нет даже в каталоге', '«EAN … не найден ни в задании, ни в каталоге WB»', 'Проверь, что сканируешь наклейку WB (с артикулом и размером), а не заводской штрихкод. Нет наклейки WB — отдай старшему на перемаркировку.'),
+      ...S('Все заказы на этот товар уже собраны', '«все заказы с этим товаром уже собраны — это лишняя пара»', 'Верни пару на полку. Не собирай сверх заказов.'),
+      ...S('Заказ на этот товар отменён', '«заказ(ы) на этот товар отменены — пару НЕ собирать»', 'Верни пару на полку.'),
+      ...S('Отсканирован не тот код', '«Это Честный Знак / Это стикер заказа… Сначала EAN»', 'Сначала всегда EAN товара, потом Честный Знак, потом стикер.'),
+      ...S('Сканер ничего не вводит', 'поле пустое, ничего не происходит', 'Кликни в большое поле ввода и повтори. Можно набрать EAN вручную и нажать Enter.'),
+
+      H('Шаг 2 — Честный Знак'),
+      ...S('Отсканирован обычный штрихкод', '«Это обычный штрихкод (EAN), а нужен Честный Знак»', 'Найди квадратный код Data Matrix на ярлыке/вкладыше и отсканируй его.'),
+      ...S('Код не похож на Честный Знак', '«Это не код Честного Знака…»', 'Считан другой код (QR, стикер) или код не полностью. Держи сканер ровно, ближе. Если Честного Знака на паре нет или он испорчен — отложи пару и позови старшего. Без Честного Знака отгружать нельзя.'),
+      ...S('Код повреждён', '«Код Честного Знака повреждён (неверная контрольная цифра)»', 'Пересканируй. Повторяется — отложи пару, это брак маркировки, к старшему.'),
+      ...S('Код уже использован', '«Этот Честный Знак уже привязан/использован в заказе …»', 'Один код — одна пара. Возьми другую пару этого же товара с другим кодом. Пару с повторным кодом отложи и позови старшего. Никогда не приклеивай один код к двум парам.'),
+      ...S('Код от другого товара (пересорт)', '«Честный Знак от ДРУГОГО товара…» или «GTIN … не совпадает с этим товаром»', 'Скорее всего пара не того размера/артикула или ярлык от другой коробки. Сверь артикул и размер на коробке и на самой паре, возьми правильную. Если товар точно верный — старший нажимает «Принять ЧЗ (старший)».'),
+      ...S('WB отклонил код', '«Ошибка WB: …»', 'Повтори скан через 10 секунд. Если в тексте про код (не найден, не в обороте, некорректный) — отложи пару и позови старшего. Заказ уже в поставке: повторный скан того же EAN продолжит с нужного шага.'),
+      ...S('Нет связи', '«Нет связи с WB (интернет/воркер)»', 'Проверь интернет, повтори скан. Ничего не потеряно.'),
+      ...S('Покупатель отменил заказ во время сборки', '«Ошибка WB» при постановке в поставку или «Заказ … отменён»', 'Нажми «Проверить отмены в WB». Отменённые пропадут из списка — пару верни на полку.'),
+
+      H('Шаг 3 — стикер'),
+      ...S('Стикер не напечатался', 'шаг «Скан стикера», стикера нет', 'Проверь принтер (бумага, лента, включён). Нажми «Печать ещё раз».'),
+      ...S('Отсканирован чужой стикер', '«Стикер не от этого заказа!»', 'Клеится ТОЛЬКО стикер, который вышел для этой пары. Найди его или «Печать ещё раз». Чужой стикер не клеить — порви.'),
+      ...S('Стикер не сканируется', 'скан не проходит', '«Печать ещё раз». Если снова — позови старшего: он проверяет и нажимает «Стикер наклеен — подтвердить».'),
+      ...S('Перепутал / хочешь начать пару заново', '—', '«Сбросить текущий», затем снова EAN. Лишний стикер порви.'),
+
+      H('Перерывы и сбои'),
+      ...S('Закрыл вкладку, отвлёкся, завис компьютер', '—', 'Открой своё задание снова и отсканируй EAN той же пары — продолжится с того шага, где остановился.'),
+      ...S('Одно задание на двух компьютерах', '—', 'Нельзя. Каждый сборщик работает только в своём задании.'),
+
+      H('Нет товара, брак, отмена — только старший'),
+      ...S('Нет пары на складе или пара бракованная', '—', 'Не собирать. Если есть другая пара того же EAN — собрать её. Если нет: заказ ещё не в поставке — «Убрать» из задания; уже в поставке — «Отменить».'),
+      ...S('Отмена заказа', 'кнопка «Отменить» в «Заказы в задании»', 'WB берёт штраф: двойная комиссия (мин. 10 ₽, макс. 10 000 ₽ за пару). Система показывает ориентировочную сумму. Отменять только при реальной невозможности отгрузить.'),
+      ...S('«Убрать» не срабатывает', '«Заказ уже добавлен в поставку WB…»', 'Заказ уже в поставке — убрать нельзя, только собрать или отменить.'),
+      ...S('Передача поставки', 'кнопка «Передать поставку в доставку»', 'В конце, когда всё отбито. Система предупредит о неотбитых заказах. После передачи новая поставка создастся сама.'),
+
+      H('Что система проверяет в Честном Знаке'),
+      { type: 'p', text: '1) Формат кода (01 + GTIN + 21 + серийный номер). 2) Контрольную цифру GTIN — отсекает повреждённые и выдуманные коды. 3) Повтор кода — в этом задании и на всех станциях. 4) Соответствие товару: если штрихкод WB совпадает с GTIN — точная проверка; иначе по кодам, ранее принятым для этого товара и для других товаров. 5) При привязке код проверяет WB.', size: 27 },
+      { type: 'p', text: 'Статус кода в самой системе Честный Знак (введён ли в оборот, не выбыл ли) станция не видит — это проверяют WB и Честный Знак после отгрузки.', size: 27, color: '#8a1c1c' },
+    ];
+    try {
+      const doc = await renderA4Pdf(blocks, 'Памятка сборщика FBS');
+      openPdf(doc, 'pamyatka_sborshchika_fbs.pdf');
+    } catch (e) { console.error(e); alert('Не удалось собрать памятку: ' + (e.message || e)); }
   }
   // Лист подбора: группируем заказы по коду+размеру+бренду, считаем количество.
   const fbsPickList = useMemo(() => {
@@ -3625,25 +4008,36 @@ function SkladLedger() {
   const fbsTd = { padding: '7px 10px' };
   const fbsLbl = { fontSize: 12, color: 'var(--ink-soft)', marginBottom: 5 };
   // ── Станция сборки (открытое задание) ──
-  const fbsOpenTotal = fbsOpen ? fbsOpen.orders.length : 0;
+  const fbsOpenLiveTotal = fbsOpen ? fbsOpen.orders.filter(o => !o.cancelled).length : 0;
   const fbsOpenDone = fbsOpen ? fbsOpen.orders.filter(o => o.done).length : 0;
+  const fbsOpenCancelled = fbsOpen ? fbsOpen.orders.filter(o => o.cancelled).length : 0;
+  const fbsOpenLeft = fbsOpenLiveTotal - fbsOpenDone;
   const fbsCurOrder = fbsOpen && fbsCurId ? fbsOpen.orders.find(o => o.orderId === fbsCurId) : null;
   const fbsOpenGroups = (() => {
     if (!fbsOpen) return [];
     const m = {};
-    fbsOpen.orders.filter(o => !o.done).forEach(o => {
+    fbsOpen.orders.filter(o => !o.done && !o.cancelled).forEach(o => {
       // Группа = конкретный баркод: разные бренды одного артикула не смешиваются.
       const k = `${o.code}|${o.size}|${o.barcode}`;
       if (!m[k]) m[k] = { code: o.code, size: o.size, brand: o.brand, barcode: o.barcode, qty: 0 };
       m[k].qty += 1;
     });
-    return Object.values(m).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }) || (Number(a.size) || 0) - (Number(b.size) || 0));
+    return Object.values(m).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }) || (parseFloat(a.size) || 0) - (parseFloat(b.size) || 0));
   })();
+  const fbsOrderRows = fbsOpen ? [...fbsOpen.orders].sort((a, b) =>
+    String(a.code).localeCompare(String(b.code), undefined, { numeric: true }) || (parseFloat(a.size) || 0) - (parseFloat(b.size) || 0)) : [];
+  const fbsStatusOf = o => o.cancelled ? ['отменён', 'var(--negative)']
+    : o.done ? ['собран', 'var(--positive)']
+    : o.sgtin ? ['ЧЗ привязан', 'var(--accent)']
+    : o.inSupply ? ['в поставке', 'var(--accent)']
+    : ['новый', 'var(--ink-soft)'];
+  const fbsCommAuto = Object.keys(fbsCommission).length > 0;
   const fbsStationContent = fbsOpen && /*#__PURE__*/React.createElement(React.Fragment, null,
     /*#__PURE__*/React.createElement(Section, { title: `Станция сборки · ${fbsOpen.name}`, icon: /*#__PURE__*/React.createElement(Printer, { size: 18 }), open: true, collapsible: false },
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: closeFbsStation }, "← К заданиям"),
-        /*#__PURE__*/React.createElement("span", { style: { fontSize: 14 } }, "Собрано: ", /*#__PURE__*/React.createElement("strong", null, fbsOpenDone), " из ", fbsOpenTotal),
+        /*#__PURE__*/React.createElement("span", { style: { fontSize: 14 } }, "Собрано: ", /*#__PURE__*/React.createElement("strong", null, fbsOpenDone), " из ", fbsOpenLiveTotal,
+          fbsOpenCancelled ? /*#__PURE__*/React.createElement("span", { style: { color: 'var(--negative)', marginLeft: 8, fontSize: 12.5 } }, `отменено ${fbsOpenCancelled}`) : null),
         fbsOpen.supplyId && /*#__PURE__*/React.createElement("span", { style: { fontSize: 12.5, color: 'var(--ink-soft)' } }, "Поставка: ", /*#__PURE__*/React.createElement("span", { className: "skl-mono" }, fbsOpen.supplyId)),
         !fbsTest && fbsOpen.supplyId && !fbsOpen.supplyDelivered && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking, onClick: deliverFbsSupply }, "Передать поставку в доставку"),
         !fbsTest && fbsOpen.supplyDelivered && /*#__PURE__*/React.createElement("span", { className: "skl-stamp", style: { color: 'var(--positive)' } }, "поставка передана"),
@@ -3651,11 +4045,20 @@ function SkladLedger() {
           className: "skl-btn " + (fbsTest ? "skl-btn-primary" : "skl-btn-ghost"),
           style: { marginLeft: 'auto' }, disabled: fbsWorking, onClick: toggleFbsTest
         }, fbsTest ? "Выключить тест" : "Тестовый режим (без WB)")),
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 } },
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: () => downloadFbsPickSheet(fbsOpen) },
+          /*#__PURE__*/React.createElement(Download, { size: 14 }), " Лист сборки A4 (PDF)"),
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: openFbsMemo },
+          /*#__PURE__*/React.createElement(AlertTriangle, { size: 14 }), " Памятка сборщика"),
+        !fbsTest && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking, onClick: checkFbsCancels },
+          /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), " Проверить отмены в WB"),
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: () => setFbsShowOrders(v => !v) },
+          /*#__PURE__*/React.createElement(ClipboardList, { size: 14 }), fbsShowOrders ? " Скрыть заказы" : ` Заказы в задании (${fbsOpen.orders.length})`)),
       fbsTest && /*#__PURE__*/React.createElement("div", {
         style: { marginBottom: 12, padding: '10px 12px', borderRadius: 8, border: '1px dashed var(--warn)', background: 'var(--warn-soft)', color: 'var(--warn)', fontSize: 13, fontWeight: 600 }
-      }, "ТЕСТОВЫЙ РЕЖИМ — в WB ничего не отправляется (ни поставка, ни Честный Знак), печатается тестовый стикер, прогресс не сохраняется. Вместо ЧЗ подойдёт любой Data Matrix или кнопка «Следующий шаг»."),
+      }, "ТЕСТОВЫЙ РЕЖИМ — в WB ничего не отправляется (ни поставка, ни Честный Знак, ни отмена), печатается тестовый стикер, прогресс не сохраняется. Проверки Честного Знака работают как настоящие."),
       /*#__PURE__*/React.createElement("div", { style: { height: 8, background: 'var(--card-2)', borderRadius: 4, overflow: 'hidden', marginBottom: 14 } },
-        /*#__PURE__*/React.createElement("div", { style: { width: `${fbsOpenTotal ? Math.round(fbsOpenDone / fbsOpenTotal * 100) : 0}%`, height: '100%', background: 'var(--positive)', transition: 'width .2s' } })),
+        /*#__PURE__*/React.createElement("div", { style: { width: `${fbsOpenLiveTotal ? Math.round(fbsOpenDone / fbsOpenLiveTotal * 100) : 0}%`, height: '100%', background: 'var(--positive)', transition: 'width .2s' } })),
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 } },
         [['ean', '1. EAN товара'], ['kiz', '2. Честный Знак'], ['sticker', '3. Скан стикера']].map(([k, l]) => /*#__PURE__*/React.createElement("span", {
           key: k, className: "skl-stamp",
@@ -3665,7 +4068,7 @@ function SkladLedger() {
         /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 28, fontWeight: 700 } }, fbsCurOrder.code, "  ·  р. ", fbsCurOrder.size || '?'),
         /*#__PURE__*/React.createElement("div", { className: "skl-mono", style: { fontSize: 18, marginTop: 4, letterSpacing: '0.05em' } }, "EAN ", fbsCurOrder.barcode || '—'),
         /*#__PURE__*/React.createElement("div", { style: { fontSize: 13, color: 'var(--ink-soft)', marginTop: 4 } },
-          `${fbsCurOrder.brand || ''} · заказ ${fbsCurOrder.orderId}${fbsCurOrder.stickerParts ? ' · стикер ' + fbsCurOrder.stickerParts : (fbsTest && fbsCurOrder.stickerBarcode ? ' · тест-стикер ' + fbsCurOrder.stickerBarcode : '')}`)),
+          `${fbsCurOrder.brand || ''} · заказ ${fbsCurOrder.orderId}${fbsCurOrder.gtin ? ' · GTIN ' + fbsCurOrder.gtin : ''}${fbsCurOrder.stickerParts ? ' · стикер ' + fbsCurOrder.stickerParts : (fbsTest && fbsCurOrder.stickerBarcode ? ' · тест-стикер ' + fbsCurOrder.stickerBarcode : '')}`)),
       /*#__PURE__*/React.createElement("input", {
         ref: fbsScanRef, className: "skl-input", autoFocus: true, value: fbsScan,
         placeholder: fbsStep === 'ean' ? 'Сканируй EAN товара…' : fbsStep === 'kiz' ? 'Сканируй Честный Знак…' : 'Сканируй стикер FBS…',
@@ -3679,13 +4082,45 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 } },
         fbsTest && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", disabled: fbsWorking, onClick: simulateFbsScan },
           "Следующий шаг (симуляция скана) ▶"),
+        fbsStep === 'kiz' && fbsGtinConflict && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--warn)', borderColor: 'var(--warn)' }, disabled: fbsWorking, onClick: acceptFbsKizBySenior },
+          "Принять ЧЗ (старший)"),
         fbsStep === 'sticker' && fbsCurOrder && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking, onClick: reprintFbsSticker },
           /*#__PURE__*/React.createElement(Printer, { size: 14 }), " Печать ещё раз"),
         fbsStep === 'sticker' && fbsCurOrder && !fbsTest && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking,
-          onClick: () => { if (window.confirm('Стикер точно наклеен на этот заказ? Подтвердить без скана?')) finishFbsOrder(fbsOpen, fbsCurOrder); } }, "Стикер наклеен — подтвердить"),
+          onClick: () => { if (window.confirm('Только для СТАРШЕГО.\nСтикер точно наклеен на этот заказ? Подтвердить без скана?')) finishFbsOrder(fbsOpen, fbsCurOrder); } }, "Стикер наклеен — подтвердить"),
         fbsCurOrder && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", disabled: fbsWorking,
-          onClick: () => { setFbsCurId(null); setFbsStep('ean'); setFbsMsg({ type: 'info', text: 'Сброшено. Сканируй EAN.' }); focusFbsScan(); } }, "Сбросить текущий"))),
-    /*#__PURE__*/React.createElement(Section, { title: `Осталось собрать (${fbsOpenTotal - fbsOpenDone})`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
+          onClick: () => { setFbsCurId(null); setFbsStep('ean'); setFbsGtinConflict(''); setFbsMsg({ type: 'info', text: 'Сброшено. Сканируй EAN.' }); focusFbsScan(); } }, "Сбросить текущий"),
+        fbsCurOrder && !fbsCurOrder.done && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, disabled: fbsWorking, onClick: () => cancelFbsOrder(fbsCurOrder) },
+          `Отменить заказ (штраф ≈ ${fbsFine(fbsCurOrder).fine} ₽)`))),
+    fbsShowOrders && /*#__PURE__*/React.createElement(Section, { title: `Заказы в задании (${fbsOpen.orders.length})`, icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
+      /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10, fontSize: 12.5, color: 'var(--ink-soft)' } },
+        "Штраф WB за отмену продавцом = цена × комиссия × 2 (мин. 10 ₽, макс. 10 000 ₽ за пару). ",
+        fbsCommAuto
+          ? "Комиссия — из тарифов WB по категории."
+          : /*#__PURE__*/React.createElement("label", { style: { display: 'flex', alignItems: 'center', gap: 6 } }, "Тарифы WB недоступны, комиссия FBS, %:",
+              /*#__PURE__*/React.createElement("input", { className: "skl-input", type: "number", min: "0", max: "100", step: "0.5", style: { width: 80 }, value: fbsCommPct, onChange: e => setFbsCommPctSafe(e.target.value) }))),
+      /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto', maxHeight: 480, overflowY: 'auto' } },
+        /*#__PURE__*/React.createElement("table", { style: { width: '100%', fontSize: 13, borderCollapse: 'collapse' } },
+          /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", { style: { color: 'var(--ink-soft)', textAlign: 'left' } },
+            ['Артикул', 'Размер', 'Бренд', 'Баркод (EAN)', 'Заказ', 'Цена', 'Статус', 'Штраф при отмене', ''].map((t, i) => /*#__PURE__*/React.createElement("th", { key: i, style: fbsTh }, t)))),
+          /*#__PURE__*/React.createElement("tbody", null, fbsOrderRows.map(o => {
+            const [st, stc] = fbsStatusOf(o);
+            const f = fbsFine(o);
+            return /*#__PURE__*/React.createElement("tr", { key: o.orderId, style: { borderTop: '1px solid var(--line)', opacity: o.cancelled ? 0.55 : 1 } },
+              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, /*#__PURE__*/React.createElement("strong", { style: { color: 'var(--accent)' } }, o.code)),
+              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, o.size || '—'),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' } }, o.brand || '—'),
+              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, o.barcode || '—'),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: 'var(--ink-soft)' }, className: "skl-mono" }, o.orderId),
+              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" }, f.price ? `${f.price.toLocaleString('ru-RU')} ₽` : '—'),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '7px 10px', color: stc, fontWeight: 600 } }, st),
+              /*#__PURE__*/React.createElement("td", { style: fbsTd, className: "skl-mono" },
+                o.cancelled ? (o.cancelFine ? `≈ ${o.cancelFine} ₽` : '—') : o.done ? '—' : `≈ ${f.fine.toLocaleString('ru-RU')} ₽ (${f.pct}%)`),
+              /*#__PURE__*/React.createElement("td", { style: { padding: '5px 10px', whiteSpace: 'nowrap' } },
+                !o.done && !(o.inSupply && !o.cancelled) && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px' }, disabled: fbsWorking, onClick: () => removeFbsOrder(o) }, "Убрать"),
+                !o.done && !o.cancelled && /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { padding: '4px 8px', color: 'var(--negative)', marginLeft: 6 }, disabled: fbsWorking, onClick: () => cancelFbsOrder(o) }, "Отменить")));
+          }))))),
+    /*#__PURE__*/React.createElement(Section, { title: `Осталось собрать (${fbsOpenLeft})`, icon: /*#__PURE__*/React.createElement(Box, { size: 18 }), open: true, collapsible: false },
       fbsOpenGroups.length === 0
         ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--positive)', fontSize: 14, fontWeight: 600 } }, "Всё собрано ✓")
         : /*#__PURE__*/React.createElement("div", { style: { overflowX: 'auto' } },
@@ -3764,18 +4199,22 @@ function SkladLedger() {
         /*#__PURE__*/React.createElement("span", { style: { fontSize: 12, color: 'var(--ink-soft)' } },
           `Выбрано: ${fbsCreateArticles.length || 'все'} арт. · возраст: ${fbsCreateAges.length || 'любой'}`))),
     /*#__PURE__*/React.createElement(Section, { title: `Задания (${fbsAssignments.length})`, icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 18 }), open: true, collapsible: false },
-      /*#__PURE__*/React.createElement("div", { style: { marginBottom: 10 } },
+      /*#__PURE__*/React.createElement("div", { style: { marginBottom: 10, display: 'flex', gap: 8, flexWrap: 'wrap' } },
         /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: reloadFbsAssignments },
-          /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), " Обновить список")),
+          /*#__PURE__*/React.createElement(RefreshCcw, { size: 14 }), " Обновить список"),
+        /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: openFbsMemo },
+          /*#__PURE__*/React.createElement(AlertTriangle, { size: 14 }), " Памятка сборщика (PDF)")),
       fbsAssignments.length === 0
         ? /*#__PURE__*/React.createElement("div", { style: { color: 'var(--ink-soft)', fontSize: 13 } }, "Заданий пока нет. Создай задание кнопкой «Создать задание».")
         : /*#__PURE__*/React.createElement("div", { style: { display: 'flex', flexDirection: 'column', gap: 10 } },
             fbsAssignments.map(a => /*#__PURE__*/React.createElement("div", { key: a.id, className: "skl-card", style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' } },
               /*#__PURE__*/React.createElement("div", null,
                 /*#__PURE__*/React.createElement("div", { className: "skl-display", style: { fontSize: 15, fontWeight: 700 } }, a.name,
-                  (a.done || 0) >= a.total && a.total > 0 && /*#__PURE__*/React.createElement("span", { className: "skl-stamp", style: { color: 'var(--positive)', marginLeft: 8 } }, "собрано")),
-                /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } }, `Собрано ${a.done || 0} из ${a.total} · создано ${fmtDate(String(a.createdAt).slice(0, 10))}`)),
-              /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8 } },
+                  (a.done || 0) >= a.total - (a.cancelled || 0) && a.total - (a.cancelled || 0) > 0 && /*#__PURE__*/React.createElement("span", { className: "skl-stamp", style: { color: 'var(--positive)', marginLeft: 8 } }, "собрано")),
+                /*#__PURE__*/React.createElement("div", { style: { fontSize: 12.5, color: 'var(--ink-soft)', marginTop: 2 } }, `Собрано ${a.done || 0} из ${a.total - (a.cancelled || 0)}${a.cancelled ? ` · отменено ${a.cancelled}` : ''} · создано ${fmtDate(String(a.createdAt).slice(0, 10))}`)),
+              /*#__PURE__*/React.createElement("div", { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+                /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", onClick: () => downloadFbsPickSheet(a) },
+                  /*#__PURE__*/React.createElement(Download, { size: 13 }), " Лист сборки A4"),
                 /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-primary", onClick: () => openFbsAssignment(a) },
                   /*#__PURE__*/React.createElement(Printer, { size: 13 }), " Открыть сборку"),
                 /*#__PURE__*/React.createElement("button", { className: "skl-btn skl-btn-ghost", style: { color: 'var(--negative)' }, onClick: () => deleteFbsAssignment(a) },
