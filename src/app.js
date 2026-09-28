@@ -1,4 +1,5 @@
 import { DUCK_VB, DUCK_PATH } from './duck.js';
+import { KizTab, parseKizCode } from './kiz.jsx';
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -265,6 +266,9 @@ const ClipboardList = p => /*#__PURE__*/React.createElement(Icon, _objectSpread(
     y2: "16"
   }))
 }));
+const ShieldCheck = p => /*#__PURE__*/React.createElement(Icon, _objectSpread(_objectSpread({}, p), {}, {
+  paths: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" }), /*#__PURE__*/React.createElement("path", { d: "m9 12 2 2 4-4" }))
+}));
 const Tag = p => /*#__PURE__*/React.createElement(Icon, _objectSpread(_objectSpread({}, p), {}, {
   paths: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
     d: "M12.59 2.59a2 2 0 0 0-2.83 0L2.59 9.76a2 2 0 0 0 0 2.83l8.82 8.82a2 2 0 0 0 2.83 0l7.17-7.17a2 2 0 0 0 0-2.83z"
@@ -304,22 +308,7 @@ const FBS_RU = 'ёйцукенгшщзхъфывапролджэячсмитьб
 const FBS_EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?@#$^&";
 // ── Честный Знак (обувь): 01 + GTIN(14) + 21 + серийный(13) [+ 91 ключ + 92 криптохвост] ──
 // Разбор кода. Скобки «(01)», символ GS и префикс символики сканера («]d2») убираем.
-function parseKiz(raw) {
-  const s = String(raw || '').replace(/\x1d/g, '').replace(/\\u001[dD]/g, '').replace(/\((\d{2,4})\)/g, '$1').replace(/^\][A-Za-z]\d/, '').trim();
-  if (!/^01\d{14}21/.test(s) || s.length < 31) return null;
-  const key = s.slice(0, 31);
-  // Сканер в режиме клавиатуры выбрасывает GS-разделители, а WB требует их
-  // (перед «91» и «92»). Восстанавливаем по структуре: 01+GTIN+21+серийный(13)
-  // <GS> 91+4 символа <GS> 92+криптохвост. Один лишний не-буквенный символ на
-  // месте GS (некоторые сканеры печатают его как «]» и т.п.) убираем.
-  const GS = '\u001d';
-  const rest = s.slice(31);
-  let wb = key;
-  const m = rest.match(/^[^A-Za-z0-9]?91(.{4})(?:[^A-Za-z0-9]?92(.*))?$/s);
-  if (rest && m) wb = key + GS + '91' + m[1] + (m[2] != null ? GS + '92' + m[2] : '');
-  else if (rest) wb = key + GS + rest.replace(/^[^A-Za-z0-9]/, '');
-  return { gtin: s.slice(2, 16), serial: s.slice(18, 31), key, full: s, wb };
-}
+function parseKiz(raw) { return parseKizCode(raw); }
 // Контрольная цифра GTIN-14 (mod 10). Неверная — код повреждён или не настоящий.
 function gtinValid(g) {
   if (!/^\d{14}$/.test(g)) return false;
@@ -2418,6 +2407,16 @@ function SkladLedger() {
     setFbsGtinMap(next);
     try { await window.storage.set(KEY_FBS_GTIN, JSON.stringify(next)); } catch (_) {}
   }
+  // Пакетное обучение (импорт кизов): одно чтение и одна запись, без гонок параллельных вызовов.
+  async function learnFbsGtinMany(pairs) {
+    const m = await kvGet(KEY_FBS_GTIN, {});
+    const next = { ...(m && typeof m === 'object' ? m : {}) };
+    let changed = 0;
+    (pairs || []).forEach(([barcode, gtin]) => { if (barcode && gtin && next[barcode] !== gtin) { next[barcode] = gtin; changed++; } });
+    if (!changed) return;
+    setFbsGtinMap(next);
+    try { await window.storage.set(KEY_FBS_GTIN, JSON.stringify(next)); } catch (_) {}
+  }
   async function finishFbsOrder(d, cur) {
     const nd = fbsPatchOrder(d, cur.orderId, { done: true, doneAt: new Date().toISOString() });
     await saveFbsDetail(nd);
@@ -3960,7 +3959,7 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("circle", { key: 4, cx: 17, cy: 18, r: 2 }) ]) },
     ...(role === 'fulfillment' ? [{ key: 'fbs', label: 'FBS · сборка', icon: /*#__PURE__*/React.createElement(Printer, { size: 17 }) }] : []),
     { key: 'tz', label: 'ТЗ на отгрузку', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 17 }) },
-    ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }] : []),
+    ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }, { key: 'kiz', label: 'Честный Знак', icon: /*#__PURE__*/React.createElement(ShieldCheck, { size: 17 }) }] : []),
     { key: 'reports', label: 'Отчёты', icon: svgIcon([
       /*#__PURE__*/React.createElement("path", { key: 1, d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }),
       /*#__PURE__*/React.createElement("polyline", { key: 2, points: "14 2 14 8 20 8" }),
@@ -4938,6 +4937,12 @@ function SkladLedger() {
     key: 'labels',
     label: 'Этикетки',
     icon: /*#__PURE__*/React.createElement(Tag, {
+      size: 16
+    })
+  }, {
+    key: 'kiz',
+    label: 'Честный Знак',
+    icon: /*#__PURE__*/React.createElement(ShieldCheck, {
       size: 16
     })
   }] : []), {
@@ -6134,7 +6139,11 @@ function SkladLedger() {
       onClick: startPrintBySize
     }, /*#__PURE__*/React.createElement(Printer, { size: 14 }), " Печать"), /*#__PURE__*/React.createElement("span", {
       style: { fontSize: 12, color: 'var(--ink-soft)' }
-    }, "Итого: ", [...labelArticles[printArticle].sizes].reduce((t, s) => t + (Number(printQtys[String(s.size)]) || 0), 0), " шт."))))), activeTab === 'reports' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
+    }, "Итого: ", [...labelArticles[printArticle].sizes].reduce((t, s) => t + (Number(printQtys[String(s.size)]) || 0), 0), " шт."))))), activeTab === 'kiz' && /*#__PURE__*/React.createElement(KizTab, {
+    Section, ArticleCombobox, labelArticles, gridVector, canonArticle,
+    learnGtinMany: learnFbsGtinMany,
+    icons: { Printer, Upload, Trash2, Loader2, AlertTriangle, RefreshCcw }
+  }), activeTab === 'reports' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
     title: "Брак по артикулам и размерам",
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
       size: 18,
