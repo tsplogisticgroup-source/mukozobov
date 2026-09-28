@@ -12,10 +12,11 @@ import { hash, authenticate } from './auth.js';
 import authRoutes from './routes/auth.js';
 import employeeRoutes from './routes/employees.js';
 import shiftRoutes from './routes/shifts.js';
-import outputRoutes from './routes/outputs.js';
 import rateRoutes from './routes/rates.js';
 import reportRoutes from './routes/reports.js';
 import paymentRoutes from './routes/payments.js';
+import unitRoutes from './routes/units.js';
+import driverRoutes from './routes/drivers.js';
 
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL || 'info' } });
 
@@ -36,15 +37,16 @@ app.get('/api/health', async () => ({ ok: true }));
 await app.register(authRoutes,      { prefix: '/api/auth' });
 await app.register(employeeRoutes,  { prefix: '/api/employees' });
 await app.register(shiftRoutes,     { prefix: '/api/shifts' });
-await app.register(outputRoutes,    { prefix: '/api/outputs' });
 await app.register(rateRoutes,      { prefix: '/api/rates' });
 await app.register(reportRoutes,    { prefix: '/api/reports' });
 await app.register(paymentRoutes,   { prefix: '/api/payments' });
+await app.register(unitRoutes,      { prefix: '/api/units' });
+await app.register(driverRoutes,    { prefix: '/api/drivers' });
 
 // Первый запуск: если админов нет — заводим по данным из .env,
 // иначе в систему было бы некому войти и некому подтверждать заявки.
 async function ensureAdmin() {
-  const exists = await one(`SELECT id FROM employees WHERE role = 'admin' LIMIT 1`);
+  const exists = await one(`SELECT id FROM employees WHERE role = 'owner' LIMIT 1`);
   if (exists) return;
   const phone = process.env.ADMIN_PHONE;
   const password = process.env.ADMIN_PASSWORD;
@@ -54,7 +56,7 @@ async function ensureAdmin() {
   }
   await q(
     `INSERT INTO employees (phone, password_hash, last_name, first_name, role, status)
-     VALUES ($1, $2, $3, $4, 'admin', 'active')
+     VALUES ($1, $2, $3, $4, 'owner', 'active')
      ON CONFLICT (phone) DO NOTHING`,
     [phone, await hash(password), process.env.ADMIN_LAST_NAME || 'Руководитель',
      process.env.ADMIN_FIRST_NAME || 'Склада'],

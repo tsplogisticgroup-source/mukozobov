@@ -1,5 +1,5 @@
 import { all, one } from '../db.js';
-import { requireRole } from '../auth.js';
+import { requireRole, ROLES } from '../auth.js';
 
 // Смена вместе с составом: одним запросом, чтобы календарь не дёргал API по каждой дате.
 const listSql = `
@@ -7,8 +7,20 @@ const listSql = `
          COALESCE(j.signups, '[]'::json) AS signups,
          COALESCE(c.picker_count, 0)     AS picker_count,
          COALESCE(c.senior_count, 0)     AS senior_count,
-         COALESCE(c.requested_count, 0)  AS requested_count
+         COALESCE(c.requested_count, 0)  AS requested_count,
+         COALESCE(v.volumes, '[]'::json) AS volumes,
+         COALESCE(sh.shipments_count, 0) AS shipments_count
   FROM shifts s
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'kind', kind, 'marketplace', marketplace, 'work_type', work_type,
+             'unit', unit, 'quantity', quantity)
+           ORDER BY marketplace, work_type, unit, kind) AS volumes
+    FROM shift_volumes WHERE shift_id = s.id
+  ) v ON true
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS shipments_count FROM shipments WHERE shift_id = s.id
+  ) sh ON true
   LEFT JOIN LATERAL (
     SELECT COUNT(*) FILTER (WHERE su.status = 'approved' AND e.role = 'picker') AS picker_count,
            COUNT(*) FILTER (WHERE su.status = 'approved' AND e.role = 'senior') AS senior_count,
@@ -21,8 +33,7 @@ const listSql = `
     SELECT json_agg(json_build_object(
              'id', su2.id, 'employee_id', e2.id, 'status', su2.status, 'role', e2.role,
              'last_name', e2.last_name, 'first_name', e2.first_name,
-             'photo_path', e2.photo_path,
-             'has_output', EXISTS (SELECT 1 FROM outputs o WHERE o.signup_id = su2.id)
+             'photo_path', e2.photo_path, 'hours', su2.hours
            ) ORDER BY e2.role DESC, e2.last_name) AS signups
     FROM shift_signups su2
     JOIN employees e2 ON e2.id = su2.employee_id
@@ -148,7 +159,96 @@ export default async function routes(app) {
     return row;
   });
 
-  // Убрать человека из смены совсем: запись и его выработка за эту смену удаляются.
+  // Часы отработал: ставит старший своей смены, руководитель или собственник.
+  app.patch('/:id/signups/:signupId/hours', { preHandler: [requireRole('senior')] }, async (req, reply) => {
+    const hours = Number(String(req.body?.hours ?? '').replace(',', '.'));
+    if (Number.isNaN(hours) || hours < 0 || hours > 24) {
+      return reply.code(400).send({ error: 'Часы: число от 0 до 24' });
+    }
+    const row = await one(
+      `UPDATE shift_signups SET hours = $3 WHERE id = $1 AND shift_id = $2 RETURNING *`,
+      [req.params.signupId, req.params.id, hours],
+    );
+    if (!row) return reply.code(404).send({ error: 'Запись не найдена' });
+    return row;
+  });
+
+  // ------------------------------------------------------- план и выработка
+  // План ставит руководитель или собственник, факт — ещё и старший смены.
+  // Тело: [{marketplace, work_type, unit, quantity}] — пустое количество удаляет строку.
+  const saveVolumes = (kind) => async (req, reply) => {
+    const rows = Array.isArray(req.body) ? req.body : [];
+    const shift = await one('SELECT id, closed FROM shifts WHERE id = $1', [req.params.id]);
+    if (!shift) return reply.code(404).send({ error: 'Смена не найдена' });
+    if (shift.closed && ROLES[req.emp.role] < ROLES.admin) {
+      return reply.code(400).send({ error: 'Смена закрыта — выработку может править только руководитель' });
+    }
+    for (const r of rows) {
+      if (!['wb', 'ozon'].includes(r.marketplace) || !['FBO', 'FBS'].includes(r.work_type) || !r.unit) {
+        return reply.code(400).send({ error: 'Неверная строка плана' });
+      }
+      const qty = Number(String(r.quantity ?? '').replace(',', '.'));
+      if (r.quantity === '' || r.quantity === null || qty === 0) {
+        await one(
+          `DELETE FROM shift_volumes WHERE shift_id = $1 AND kind = $2
+             AND marketplace = $3 AND work_type = $4 AND unit = $5 RETURNING id`,
+          [shift.id, kind, r.marketplace, r.work_type, r.unit],
+        );
+        continue;
+      }
+      if (Number.isNaN(qty) || qty < 0) return reply.code(400).send({ error: 'Количество должно быть числом' });
+      await one(
+        `INSERT INTO shift_volumes (shift_id, kind, marketplace, work_type, unit, quantity, updated_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (shift_id, kind, marketplace, work_type, unit)
+         DO UPDATE SET quantity = EXCLUDED.quantity, updated_by = EXCLUDED.updated_by, updated_at = now()
+         RETURNING id`,
+        [shift.id, kind, r.marketplace, r.work_type, r.unit, qty, req.emp.id],
+      );
+    }
+    return all('SELECT * FROM shift_volumes WHERE shift_id = $1 ORDER BY marketplace, work_type, unit, kind',
+      [shift.id]);
+  };
+
+  app.put('/:id/plan', { preHandler: [requireRole('admin')] }, saveVolumes('plan'));
+  app.put('/:id/fact', { preHandler: [requireRole('senior')] }, saveVolumes('fact'));
+
+  // ------------------------------------------------------------- отгрузки
+  const shipmentsSql = `
+    SELECT sh.*, d.name AS driver_name, d.vehicle AS driver_vehicle
+    FROM shipments sh LEFT JOIN drivers d ON d.id = sh.driver_id
+    WHERE sh.shift_id = $1 ORDER BY sh.created_at`;
+
+  app.get('/:id/shipments', async (req) => all(shipmentsSql, [req.params.id]));
+
+  app.post('/:id/shipments', { preHandler: [requireRole('senior')] }, async (req, reply) => {
+    const { driver_id, marketplace, destination, pallets, boxes, comment } = req.body || {};
+    if (!['wb', 'ozon'].includes(marketplace)) {
+      return reply.code(400).send({ error: 'Куда едет: ВБ или Озон' });
+    }
+    if (!destination?.trim()) return reply.code(400).send({ error: 'Укажите склад или адрес назначения' });
+    const p = Number(pallets) || 0;
+    const b = Number(boxes) || 0;
+    if (p < 0 || b < 0 || (!p && !b)) {
+      return reply.code(400).send({ error: 'Укажите объём: паллеты или короба' });
+    }
+    const shift = await one('SELECT id FROM shifts WHERE id = $1', [req.params.id]);
+    if (!shift) return reply.code(404).send({ error: 'Смена не найдена' });
+    await one(
+      `INSERT INTO shipments (shift_id, driver_id, marketplace, destination, pallets, boxes, comment, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [shift.id, driver_id || null, marketplace, destination.trim(), p, b, comment?.trim() || null, req.emp.id],
+    );
+    return all(shipmentsSql, [shift.id]);
+  });
+
+  app.delete('/:id/shipments/:shipmentId', { preHandler: [requireRole('senior')] }, async (req) => {
+    await one('DELETE FROM shipments WHERE id = $1 AND shift_id = $2 RETURNING id',
+      [req.params.shipmentId, req.params.id]);
+    return all(shipmentsSql, [req.params.id]);
+  });
+
+  // Убрать человека из смены совсем: запись удаляется.
   app.delete('/:id/signups/:signupId', { preHandler: [requireRole('senior')] }, async (req, reply) => {
     const row = await one(
       'DELETE FROM shift_signups WHERE id = $1 AND shift_id = $2 RETURNING id',
@@ -158,13 +258,10 @@ export default async function routes(app) {
     return { ok: true };
   });
 
-  // Мои смены: личный календарь и форма выработки берут данные отсюда.
+  // Мои смены: личный календарь с часами и начислением по каждому выходу.
   app.get('/my/list', async (req) => all(
-    `SELECT su.id AS signup_id, su.status, s.id AS shift_id, s.work_date, s.kind, s.closed,
-            COALESCE(p.total_amount, 0) AS pay,
-            COALESCE((SELECT json_agg(json_build_object('id', o.id, 'work_type', o.work_type,
-                                                        'unit', o.unit, 'quantity', o.quantity))
-                      FROM outputs o WHERE o.signup_id = su.id), '[]'::json) AS outputs
+    `SELECT su.id AS signup_id, su.status, su.hours, s.id AS shift_id, s.work_date, s.kind, s.closed,
+            COALESCE(p.total_amount, 0) AS pay, COALESCE(p.hourly_rate, 0) AS hourly_rate
      FROM shift_signups su
      JOIN shifts s ON s.id = su.shift_id
      LEFT JOIN v_shift_pay p ON p.signup_id = su.id

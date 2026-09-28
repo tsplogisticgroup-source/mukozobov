@@ -7,7 +7,7 @@ export default async function routes(app) {
 
   // За что начислены деньги: список смен с датой, видом и суммой.
   const earningsOf = (employeeId) => all(
-    `SELECT signup_id, work_date, kind, shift_amount, piece_amount, total_amount, shift_closed
+    `SELECT signup_id, work_date, kind, hours, hourly_rate, total_amount, shift_closed
      FROM v_shift_pay WHERE employee_id = $1
      ORDER BY work_date DESC, kind LIMIT 200`,
     [employeeId],
@@ -30,7 +30,7 @@ export default async function routes(app) {
   });
 
   // Кому и сколько должны — главный экран раздела «Выплаты».
-  app.get('/debts', { preHandler: [requireRole('admin')] }, async () => {
+  app.get('/debts', { preHandler: [requireRole('owner')] }, async () => {
     const rows = await all(
       `SELECT * FROM v_employee_balance
        WHERE status <> 'pending'
@@ -47,7 +47,7 @@ export default async function routes(app) {
   });
 
   // Лицевой счёт конкретного сотрудника со всей историей.
-  app.get('/employee/:id', { preHandler: [requireRole('admin')] }, async (req, reply) => {
+  app.get('/employee/:id', { preHandler: [requireRole('owner')] }, async (req, reply) => {
     const balance = await one(
       'SELECT * FROM v_employee_balance WHERE employee_id = $1', [req.params.id]);
     if (!balance) return reply.code(404).send({ error: 'Сотрудник не найден' });
@@ -68,7 +68,7 @@ export default async function routes(app) {
   });
 
   // ------------------------------------------------------------------ выплаты
-  app.post('/', { preHandler: [requireRole('admin')] }, async (req, reply) => {
+  app.post('/', { preHandler: [requireRole('owner')] }, async (req, reply) => {
     const { employee_id, amount, paid_on, method, comment } = req.body || {};
     if (!employee_id) return reply.code(400).send({ error: 'Не выбран сотрудник' });
     if (!(Number(amount) > 0)) return reply.code(400).send({ error: 'Сумма должна быть больше нуля' });
@@ -87,13 +87,13 @@ export default async function routes(app) {
     );
   });
 
-  app.delete('/:id', { preHandler: [requireRole('admin')] }, async (req) => {
+  app.delete('/:id', { preHandler: [requireRole('owner')] }, async (req) => {
     await one('DELETE FROM payments WHERE id = $1 RETURNING id', [req.params.id]);
     return { ok: true };
   });
 
   // ------------------------------------------------------------------- штрафы
-  app.post('/penalties', { preHandler: [requireRole('admin')] }, async (req, reply) => {
+  app.post('/penalties', { preHandler: [requireRole('owner')] }, async (req, reply) => {
     const { employee_id, amount, reason, penalty_on, signup_id } = req.body || {};
     if (!employee_id) return reply.code(400).send({ error: 'Не выбран сотрудник' });
     if (!(Number(amount) > 0)) return reply.code(400).send({ error: 'Сумма должна быть больше нуля' });
@@ -106,7 +106,7 @@ export default async function routes(app) {
     );
   });
 
-  app.delete('/penalties/:id', { preHandler: [requireRole('admin')] }, async (req) => {
+  app.delete('/penalties/:id', { preHandler: [requireRole('owner')] }, async (req) => {
     await one('DELETE FROM penalties WHERE id = $1 RETURNING id', [req.params.id]);
     return { ok: true };
   });

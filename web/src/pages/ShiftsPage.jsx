@@ -23,6 +23,8 @@ function Slot({ shift, onOpen, mySignup }) {
   const fill = !need ? '' : have >= need ? ' slot__fill--ok' : have === 0 ? ' slot__fill--low' : '';
   const bar = !need ? 'part' : have >= need ? '' : have === 0 ? 'low' : 'part';
   const people = shift.signups || [];
+  const hasPlan = (shift.volumes || []).some((v) => v.kind === 'plan');
+  const hasFact = (shift.volumes || []).some((v) => v.kind === 'fact');
 
   return (
     <button className={`slot slot--${shift.kind}`} onClick={onOpen}>
@@ -37,6 +39,16 @@ function Slot({ shift, onOpen, mySignup }) {
       <div className="bar"><i className={bar} style={{ width: `${pct}%` }} /></div>
 
       {shift.note && <div className="slot__note">{shift.note}</div>}
+
+      {(hasPlan || hasFact || Number(shift.shipments_count) > 0) && (
+        <div className="faces" style={{ marginBottom: 6 }}>
+          {hasPlan && <span className="chip">план</span>}
+          {hasFact && <span className="chip chip--ok">факт внесён</span>}
+          {Number(shift.shipments_count) > 0 && (
+            <span className="chip">{shift.shipments_count} отгр.</span>
+          )}
+        </div>
+      )}
 
       {people.length ? (
         <div className="faces">

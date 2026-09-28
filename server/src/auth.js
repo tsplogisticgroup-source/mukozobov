@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import { one } from './db.js';
 
-export const ROLES = { admin: 3, senior: 2, picker: 1 };
+// owner — собственник, admin — руководитель склада, senior — старший смены, picker — комплектовщик
+export const ROLES = { owner: 4, admin: 3, senior: 2, picker: 1 };
 
 export const hash = (plain) => bcrypt.hash(plain, 10);
 export const verify = (plain, digest) => bcrypt.compare(plain, digest);
@@ -27,7 +28,7 @@ export async function authenticate(req, reply) {
   req.emp = emp;
 }
 
-// Минимальный уровень роли: requireRole('senior') пропустит senior и admin.
+// Минимальный уровень роли: requireRole('senior') пропустит senior, admin и owner.
 export function requireRole(min) {
   return async (req, reply) => {
     if (!req.emp) return reply.code(401).send({ error: 'Нужен вход в систему' });

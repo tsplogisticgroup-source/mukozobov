@@ -83,14 +83,20 @@ export default async function routes(app) {
   // Подтверждение заявки на регистрацию и смена роли — только руководитель.
   app.patch('/:id', { preHandler: [requireRole('admin')] }, async (req, reply) => {
     const { role, status, note } = req.body || {};
-    if (role && !['admin', 'senior', 'picker'].includes(role)) {
-      return reply.code(400).send({ error: 'Неизвестная роль' });
+    if (role && !['owner', 'admin', 'senior', 'picker'].includes(role)) {
+      return reply.code(400).send({ error: 'Неизвестная должность' });
     }
     if (status && !['pending', 'active', 'blocked'].includes(status)) {
       return reply.code(400).send({ error: 'Неизвестный статус' });
     }
-    if (req.params.id === req.emp.id && (status === 'blocked' || (role && role !== 'admin'))) {
+    if (req.params.id === req.emp.id && (status === 'blocked' || (role && role !== req.emp.role))) {
       return reply.code(400).send({ error: 'Нельзя понизить или заблокировать самого себя' });
+    }
+    // Собственника назначает и трогает только собственник.
+    const target = await one('SELECT role FROM employees WHERE id = $1', [req.params.id]);
+    if (!target) return reply.code(404).send({ error: 'Сотрудник не найден' });
+    if (req.emp.role !== 'owner' && (target.role === 'owner' || role === 'owner')) {
+      return reply.code(403).send({ error: 'Собственника может менять только собственник' });
     }
     const emp = await one(
       `UPDATE employees SET role = COALESCE($2, role), status = COALESCE($3, status),
@@ -111,13 +117,16 @@ export default async function routes(app) {
     const emp = await one('SELECT id, role FROM employees WHERE id = $1', [req.params.id]);
     if (!emp) return reply.code(404).send({ error: 'Сотрудник не найден' });
 
-    // последний руководитель должен остаться, иначе в систему будет не войти
-    if (emp.role === 'admin') {
+    if (emp.role === 'owner') {
+      if (req.emp.role !== 'owner') {
+        return reply.code(403).send({ error: 'Собственника может удалить только собственник' });
+      }
+      // последний собственник должен остаться, иначе к деньгам будет не подступиться
       const others = await one(
         `SELECT count(*)::int AS n FROM employees
-         WHERE role = 'admin' AND status = 'active' AND id <> $1`, [req.params.id]);
+         WHERE role = 'owner' AND status = 'active' AND id <> $1`, [req.params.id]);
       if (!others.n) {
-        return reply.code(400).send({ error: 'Это последний руководитель — удалять нельзя' });
+        return reply.code(400).send({ error: 'Это последний собственник — удалять нельзя' });
       }
     }
 

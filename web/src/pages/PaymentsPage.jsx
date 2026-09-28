@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../lib/api.js';
-import { initials, money, todayISO, plural, ROLE_NAME, KIND_NAME, longDate } from '../lib/format.js';
+import { initials, money, qty, todayISO, plural, ROLE_NAME, KIND_NAME, longDate } from '../lib/format.js';
 
 const METHOD = { cash: 'Наличными', card: 'На карту', account: 'На счёт' };
 
@@ -88,8 +88,8 @@ function EmployeeSheet({ employeeId, onClose, onChanged }) {
             <thead>
               <tr>
                 <th>Смена</th>
-                <th className="n">Ставка</th>
-                <th className="n">Сдельно</th>
+                <th className="n">Часов</th>
+                <th className="n">₽/час</th>
                 <th className="n">Итого</th>
               </tr>
             </thead>
@@ -103,8 +103,8 @@ function EmployeeSheet({ employeeId, onClose, onChanged }) {
                     {longDate(r.work_date)} · {KIND_NAME[r.kind].toLowerCase()}
                     {!r.shift_closed && <div className="small muted">смена не закрыта</div>}
                   </td>
-                  <td className="n">{money(r.shift_amount)}</td>
-                  <td className="n">{money(r.piece_amount)}</td>
+                  <td className="n">{qty(r.hours)}</td>
+                  <td className="n">{money(r.hourly_rate)}</td>
                   <td className="n"><b>{money(r.total_amount)}</b></td>
                 </tr>
               ))}

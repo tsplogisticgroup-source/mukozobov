@@ -733,3 +733,58 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .row > * { flex: 1 1 140px; }
   .row > .btn { flex: 1 1 100%; }
 }
+
+/* ------------------------------------------------- план и факт по смене */
+/* Сетка: вид работ | ВБ (план · факт) | Озон (план · факт). */
+
+.vol-head, .vol-sub, .vol-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.vol-head { font-size: 11.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); }
+.vol-mp { text-align: center; font-family: var(--display); font-size: 15px; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.vol-sub { margin: 2px 0 6px; }
+.vol-sub__pair { display: flex; gap: 6px; }
+.vol-sub__pair i { flex: 1; text-align: center; font-style: normal; font-size: 11px; color: var(--ink-3); }
+
+.vol-row { padding: 6px 0; border-top: 1px dashed var(--line); }
+.vol-row__name { font-size: 13.5px; font-weight: 600; }
+.vol-row__pair { display: flex; gap: 6px; }
+
+.vol-input, .vol-val {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  text-align: center;
+  border-radius: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vol-input { border: 1px solid var(--line-2); background: #fff; padding: 0 6px; }
+.vol-input--fact { border-color: var(--tan); }
+.vol-input:focus { outline: none; box-shadow: 0 0 0 3px var(--tan-soft); }
+.vol-val { display: grid; place-items: center; background: var(--paper-2); color: var(--ink-2); }
+.vol-val--fact { color: var(--ink); font-weight: 700; }
+
+/* часы в строке сотрудника */
+.hours-field { display: inline-flex; align-items: center; gap: 5px; }
+.hours-field input {
+  width: 62px;
+  min-height: 42px;
+  text-align: center;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.hours-field input:focus { outline: none; border-color: var(--tan); box-shadow: 0 0 0 3px var(--tan-soft); }
+.hours-field span { font-size: 13px; color: var(--ink-2); }
+
+@media (max-width: 420px) {
+  .vol-row__name { font-size: 12.5px; }
+  .vol-input, .vol-val { min-height: 40px; font-size: 14px; }
+}

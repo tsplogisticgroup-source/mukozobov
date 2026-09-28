@@ -1,10 +1,14 @@
 export const ROLE_NAME = {
+  owner: 'Собственник',
   admin: 'Руководитель склада',
   senior: 'Старший смены',
   picker: 'Комплектовщик',
 };
 
-export const ROLE_SHORT = { admin: 'Рук.', senior: 'Старший', picker: 'Комплектовщик' };
+export const ROLE_SHORT = { owner: 'Собственник', admin: 'Рук.', senior: 'Старший', picker: 'Комплектовщик' };
+
+export const MARKET_NAME = { wb: 'ВБ', ozon: 'Озон' };
+export const WORK_NAME = { FBO: 'ФБО', FBS: 'ФБС' };
 
 export const KIND_NAME = { day: 'Дневная', night: 'Ночная' };
 

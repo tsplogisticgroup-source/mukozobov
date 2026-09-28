@@ -47,11 +47,14 @@ export function AuthProvider({ children }) {
     setMe(null);
   };
 
+  // owner — собственник, admin — руководитель склада, senior — старший, picker — комплектовщик.
+  const level = { owner: 4, admin: 3, senior: 2, picker: 1 }[me?.role] || 0;
   const can = {
-    // Старший ведёт смены и видит выработку, деньги — только у руководителя.
-    manageShifts: me?.role === 'admin' || me?.role === 'senior',
-    manageCrew: me?.role === 'admin',
-    seeMoney: me?.role === 'admin',
+    manageShifts: level >= 2,   // состав, часы, факт выработки, отгрузки
+    setPlan: level >= 3,        // план на смену
+    manageCrew: level >= 3,     // подтверждать людей, должности, водители
+    seeMoney: level >= 4,       // ставки, выплаты, зарплаты, затраты
+    isOwner: level >= 4,
   };
 
   return (
