@@ -163,6 +163,20 @@ async function makeLabelsPdf(items, onProgress) {
   }
   return doc;
 }
+// Шаблон файла с кизами (xlsx): те же колонки, что понимает разбор, + строки-примеры.
+export function downloadKizTemplate() {
+  const XLSX = window.XLSX;
+  const rows = [
+    ['Артикул', 'Размер', 'Бренд', 'GTIN', 'Код маркировки (полный, с разделителями)'],
+    ['105-3', '36', 'LOFERS', '04660777484265', '0104660777484265215uNkPO=-6bFsz' + GS + '9180C5' + GS + '924FaAejoa6cfk0aZolJBLWm2FP6r7/XYazmFsVGp3QCRLj0YSTj9Kg/zPXjIKVBsdy/GoubPxVaFtS3V8Xn7rlA=='],
+    ['105-3', '37', 'LOFERS', '04660777484272', '0104660777484272215eZ4NjNigRoGP' + GS + '9180C5' + GS + '92RxrStqN6Kt+2CTJ2888HfuVDQeA2NHj9pRdMpZbf6EQ9+scmYDOgUbr2Dkl9UZhulglGhCG/yyBTRfXk4rWW1Q=='],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 16 }, { wch: 120 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Кизы');
+  XLSX.writeFile(wb, 'Шаблон_кизы_ЧЗ.xlsx');
+}
 function openPrint(doc) {
   doc.autoPrint();
   const w = window.open(doc.output('bloburl'), '_blank');
@@ -171,7 +185,7 @@ function openPrint(doc) {
 
 // ── Компонент вкладки ────────────────────────────────────────────────────────────
 export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVector, learnGtinMany, canonArticle }) {
-  const { Printer, Upload, Trash2, Loader2, AlertTriangle, RefreshCcw } = icons;
+  const { Printer, Upload, Download, Trash2, Loader2, AlertTriangle, RefreshCcw } = icons;
   const [index, setIndex] = useState({});
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -409,11 +423,26 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
         Загрузи выгрузку из личного кабинета Честного Знака (xlsx или csv): артикул, размер и GTIN берутся из файла,
         коды ложатся на остаток по артикулу и размеру. Дубли и уже напечатанные коды отбрасываются автоматически.
       </p>
+      <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, border: '1px dashed var(--line)', background: 'var(--paper)', fontSize: 13 }}>
+        <div style={{ fontWeight: 600, marginBottom: 6 }}>Как передать файл с кизами</div>
+        <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.55 }}>
+          <li><b>Проще всего</b> — выгрузка кодов из Честного Знака как есть (файл вида «… ALL.xlsx»): в ней уже есть
+            «КИ (код идентификации)», полный код с разделителями, «GTIN», «Модель / артикул производителя»,
+            «Размер в штихмассовой системе», «Товарный знак». Ничего править не нужно.</li>
+          <li><b>Или по шаблону</b> — скачай его ниже и заполни: <span className="skl-mono">Артикул · Размер · Бренд · GTIN · Код маркировки</span>.
+            Одна строка = один код. Строки-примеры из шаблона удали.</li>
+          <li><b>Артикул</b> пиши так же, как он записан в ВМС (например <span className="skl-mono">105-3</span>), <b>размер</b> — цифрами (<span className="skl-mono">36</span>). Без размера код не примется.</li>
+          <li><b>Код маркировки</b> — полный, как выдаёт Честный Знак: <span className="skl-mono">01…21…</span> + криптохвост <span className="skl-mono">91… 92…</span>.
+            Разделители GS (невидимый символ; в Excel бывает виден как квадратик) сохраняй — если они потерялись, ВМС восстановит их сама.</li>
+          <li>Названия колонок можно писать по-своему — ВМС ищет их по смыслу («артикул», «размер», «gtin», «бренд»/«товарный знак»), а колонку с кодами находит по содержимому.</li>
+        </ol>
+      </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <label className="skl-btn skl-btn-primary" style={{ cursor: 'pointer' }}>
           <Upload size={14} /> Загрузить файл с кизами
           <input type="file" accept=".xlsx,.xls,.csv,.txt" style={{ display: 'none' }} onChange={handleFile} />
         </label>
+        <button className="skl-btn skl-btn-ghost" onClick={downloadKizTemplate}><Download size={14} /> Скачать шаблон (xlsx)</button>
         {busyRow}
       </div>
       {preview && <div style={{ marginTop: 14, padding: 12, borderRadius: 10, border: '1px solid var(--line)', background: 'var(--paper)' }}>

@@ -6142,7 +6142,7 @@ function SkladLedger() {
     }, "Итого: ", [...labelArticles[printArticle].sizes].reduce((t, s) => t + (Number(printQtys[String(s.size)]) || 0), 0), " шт."))))), activeTab === 'kiz' && /*#__PURE__*/React.createElement(KizTab, {
     Section, ArticleCombobox, labelArticles, gridVector, canonArticle,
     learnGtinMany: learnFbsGtinMany,
-    icons: { Printer, Upload, Trash2, Loader2, AlertTriangle, RefreshCcw }
+    icons: { Printer, Upload, Download, Trash2, Loader2, AlertTriangle, RefreshCcw }
   }), activeTab === 'reports' && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Section, {
     title: "Брак по артикулам и размерам",
     icon: /*#__PURE__*/React.createElement(AlertTriangle, {
