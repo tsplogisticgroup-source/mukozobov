@@ -5,7 +5,8 @@
 //   • POST /fbs/stickers    — FBS: стикеры на заказы (тело {orders:[id,...]}).
 //   • POST /fbs/supplies                    — создать поставку (тело {name}).
 //   • GET  /fbs/supplies?limit=&next=       — список поставок.
-//   • PATCH /fbs/supplies/{id}/orders/{oid} — добавить заказ в поставку.
+//   • PATCH /fbs/supplies/{id}/orders      — добавить заказы в поставку (тело {orders:[id,...]}).
+//   • PUT  /fbs/orders/{id}/sgtin           — привязать КИЗ Честного Знака (тело {sgtins:[...]}).
 //   • PATCH /fbs/supplies/{id}/deliver      — отгрузить поставку.
 //   • GET  /fbs/supplies/{id}/barcode?type=png — ШК/QR короба поставки.
 //
@@ -90,16 +91,27 @@ export default {
           return await proxy(`${MP}/api/v3/orders/stickers${qs}`, 'POST', mp, body);
         }
         if (path === '/fbs/supplies' && request.method === 'GET') {
-          const qs = url.search || '?limit=50';
-          return await proxy(`${MP}/api/v3/supplies${qs}`, 'GET', mp);
+          // WB требует оба параметра пагинации: limit и next (в первом запросе next=0).
+          const sp = new URLSearchParams(url.search);
+          if (!sp.has('limit')) sp.set('limit', '50');
+          if (!sp.has('next')) sp.set('next', '0');
+          return await proxy(`${MP}/api/v3/supplies?${sp.toString()}`, 'GET', mp);
         }
         if (path === '/fbs/supplies' && request.method === 'POST') {
           const body = await request.text();
           return await proxy(`${MP}/api/v3/supplies`, 'POST', mp, body);
         }
+        // Добавить заказы в поставку. С 18.12.2025 у WB новый метод:
+        // PATCH /api/marketplace/v3/supplies/{supplyId}/orders с телом {"orders":[id,...]} (до 100).
+        // Старый /api/v3/supplies/{id}/orders/{orderId} отвечает «path not found».
+        const mAddMany = path.match(/^\/fbs\/supplies\/([^/]+)\/orders$/);
+        if (mAddMany && request.method === 'PATCH') {
+          const body = await request.text();
+          return await proxy(`${MP}/api/marketplace/v3/supplies/${mAddMany[1]}/orders`, 'PATCH', mp, body);
+        }
         const mAdd = path.match(/^\/fbs\/supplies\/([^/]+)\/orders\/([^/]+)$/);
-        if (mAdd && request.method === 'PATCH') {
-          return await proxy(`${MP}/api/v3/supplies/${mAdd[1]}/orders/${mAdd[2]}`, 'PATCH', mp);
+        if (mAdd && request.method === 'PATCH') { // совместимость со старым фронтом: один заказ
+          return await proxy(`${MP}/api/marketplace/v3/supplies/${mAdd[1]}/orders`, 'PATCH', mp, JSON.stringify({ orders: [Number(mAdd[2])] }));
         }
         const mDeliver = path.match(/^\/fbs\/supplies\/([^/]+)\/deliver$/);
         if (mDeliver && request.method === 'PATCH') {

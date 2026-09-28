@@ -305,9 +305,20 @@ const FBS_EN = "`qwertyuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVB
 // ── Честный Знак (обувь): 01 + GTIN(14) + 21 + серийный(13) [+ 91 ключ + 92 криптохвост] ──
 // Разбор кода. Скобки «(01)», символ GS и префикс символики сканера («]d2») убираем.
 function parseKiz(raw) {
-  const s = String(raw || '').replace(/\x1d/g, '').replace(/\((\d{2,4})\)/g, '$1').replace(/^\][A-Za-z]\d/, '').trim();
+  const s = String(raw || '').replace(/\x1d/g, '').replace(/\\u001[dD]/g, '').replace(/\((\d{2,4})\)/g, '$1').replace(/^\][A-Za-z]\d/, '').trim();
   if (!/^01\d{14}21/.test(s) || s.length < 31) return null;
-  return { gtin: s.slice(2, 16), serial: s.slice(18, 31), key: s.slice(0, 31), full: s };
+  const key = s.slice(0, 31);
+  // Сканер в режиме клавиатуры выбрасывает GS-разделители, а WB требует их
+  // (перед «91» и «92»). Восстанавливаем по структуре: 01+GTIN+21+серийный(13)
+  // <GS> 91+4 символа <GS> 92+криптохвост. Один лишний не-буквенный символ на
+  // месте GS (некоторые сканеры печатают его как «]» и т.п.) убираем.
+  const GS = '\u001d';
+  const rest = s.slice(31);
+  let wb = key;
+  const m = rest.match(/^[^A-Za-z0-9]?91(.{4})(?:[^A-Za-z0-9]?92(.*))?$/s);
+  if (rest && m) wb = key + GS + '91' + m[1] + (m[2] != null ? GS + '92' + m[2] : '');
+  else if (rest) wb = key + GS + rest.replace(/^[^A-Za-z0-9]/, '');
+  return { gtin: s.slice(2, 16), serial: s.slice(18, 31), key, full: s, wb };
 }
 // Контрольная цифра GTIN-14 (mod 10). Неверная — код повреждён или не настоящий.
 function gtinValid(g) {
@@ -2571,12 +2582,13 @@ function SkladLedger() {
         setFbsGtinConflict('');
         d = await ensureFbsSupply(d); // 1) поставка
         if (!cur.inSupply) {           // 2) заказ в поставку → статус «на сборке»
-          await wbCall(`/fbs/supplies/${encodeURIComponent(d.supplyId)}/orders/${cur.orderId}`, 'PATCH');
+          await wbCall(`/fbs/supplies/${encodeURIComponent(d.supplyId)}/orders`, 'PATCH', { orders: [Number(cur.orderId)] });
           d = fbsPatchOrder(d, cur.orderId, { inSupply: true, supplyId: d.supplyId });
           await saveFbsDetail(d);
         }
-        await wbCall(`/fbs/orders/${cur.orderId}/sgtin`, 'PUT', { sgtins: [value] }); // 3) КИЗ → WB
-        d = fbsPatchOrder(d, cur.orderId, { sgtin: value, gtin: chk.kiz.gtin, kizKey: chk.kiz.key, kizOverride: !!(opt && opt.override === value) });
+        // 3) КИЗ → WB: с восстановленными GS-разделителями (JSON сам экранирует их как \u001d)
+        await wbCall(`/fbs/orders/${cur.orderId}/sgtin`, 'PUT', { sgtins: [chk.kiz.wb] });
+        d = fbsPatchOrder(d, cur.orderId, { sgtin: chk.kiz.wb, gtin: chk.kiz.gtin, kizKey: chk.kiz.key, kizOverride: !!(opt && opt.override === value) });
         await saveFbsDetail(d);
         try { // регистрируем код как использованный (ключ по GTIN — маленький)
           const ukey = KEY_FBS_KIZ_USED + ':' + chk.kiz.gtin;
