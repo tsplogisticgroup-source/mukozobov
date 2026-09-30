@@ -176,81 +176,159 @@ export function parseKizFile(buf, { canonArticle, index, barcodeMap }) {
 }
 
 // ── Этикетка 58×40: наша этикетка + DataMatrix Честного Знака ───────────────────
+// Оба кода кладутся в PDF ВЕКТОРОМ (прямоугольниками), а не картинкой: принтер печатает
+// их с ровными краями при любом разрешении. Размер модуля и координаты кратны точке
+// термопринтера 203 dpi (0,125 мм): DataMatrix — 3 точки на модуль (0,375 мм; у Честного
+// Знака минимум 0,255 мм), Code128 — 3 точки на штрих. Текст — растровый слой 600 dpi
+// (кириллица), одинаковый для всех этикеток одного размера, поэтому в PDF он лежит один раз.
+const LW = 58, LH = 40, DOT = 0.125;
+const snap = v => Math.round(v / DOT) * DOT;
+const SELLER_LINE = 'ИП: Мукозобов Д.В.';
 let bwipMod = null;
 async function bwip() {
   if (!bwipMod) { const m = await import('bwip-js'); bwipMod = m.toCanvas ? m : m.default; }
   return bwipMod;
 }
-export async function renderKizLabelPNG({ name, article, size, barcode, brand, code }) {
-  const DPI = 300, LW_mm = 58, LH_mm = 40, MM = DPI / 25.4, PT = DPI / 72;
-  const mm = v => Math.round(v * MM);
-  const W = mm(LW_mm), H = mm(LH_mm);
-  const cvs = document.createElement('canvas'); cvs.width = W; cvs.height = H;
-  const ctx = cvs.getContext('2d');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = '#000';
-  // DataMatrix справа сверху (GS1: FNC1 в начале и как разделитель групп).
-  const DM = mm(17), DMX = W - mm(2) - DM, DMY = mm(1.5);
+// Матрица GS1 DataMatrix (FNC1 в начале и на месте каждого GS): массив строк из '0'/'1'.
+export async function kizMatrix(code) {
   const lib = await bwip();
-  const dm = document.createElement('canvas');
-  lib.toCanvas(dm, { bcid: 'datamatrix', text: '^FNC1' + code.replace(/\u001d/g, '^FNC1'), parsefnc: true, scale: 6, padding: 0 });
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(dm, DMX, DMY, DM, DM);
-  ctx.imageSmoothingEnabled = true;
-  ctx.font = `${Math.round(4.2 * PT)}px Arial`; ctx.textAlign = 'center';
-  ctx.fillText('Честный знак', DMX + DM / 2, DMY + DM + mm(2.2));
-  ctx.textAlign = 'left';
-  // Текст слева, в колонке до DataMatrix.
-  const ML = mm(2.5), maxW = DMX - mm(2) - ML;
-  const rows = [
-    { t: name || article, pt: 7.5, center: false },
-    { t: `Артикул: ${article}`, pt: 6.5 },
-    { t: `Размер: ${size}`, pt: 9.3 },
-    brand ? { t: `Бренд: ${brand}`, pt: 6 } : null,
-    { t: 'ИП: Мукозобов Д.В.', pt: 6 },
-  ].filter(Boolean);
-  const T0 = mm(1.5), T1 = mm(21.5), totalH = rows.reduce((s, r) => s + r.pt * PT, 0);
-  const gap = rows.length > 1 ? (T1 - T0 - totalH) / (rows.length - 1) : 0;
-  let y = T0;
-  for (const r of rows) {
-    let pt = r.pt, text = r.t;
-    ctx.font = `bold ${Math.round(pt * PT)}px Arial`;
-    while (ctx.measureText(text).width > maxW && pt > 4.5) { pt -= 0.3; ctx.font = `bold ${Math.round(pt * PT)}px Arial`; }
-    if (ctx.measureText(text).width > maxW) { while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1); text += '…'; }
-    ctx.fillText(text, ML, y + r.pt * PT);
-    y += r.pt * PT + gap;
+  const c = document.createElement('canvas');
+  lib.toCanvas(c, { bcid: 'datamatrix', text: '^FNC1' + code.replace(/\u001d/g, '^FNC1'), parsefnc: true, scale: 1, padding: 0 });
+  const w = c.width, h = c.height;
+  const px = c.getContext('2d').getImageData(0, 0, w, h).data;
+  const dark = (x, y) => { const i = (y * w + x) * 4; return px[i + 3] > 127 && px[i] < 128; };
+  let step = 0; while (step < w && dark(step, 0)) step++; // верхняя строка символа — пунктир шириной в модуль
+  const n = step ? w / step : 0;
+  if (!step || w !== h || n !== Math.round(n)) throw new Error('DataMatrix: не удалось определить размер модуля');
+  const rows = [];
+  for (let y = 0; y < n; y++) {
+    let r = '';
+    for (let x = 0; x < n; x++) r += dark(x * step + (step >> 1), y * step + (step >> 1)) ? '1' : '0';
+    rows.push(r);
   }
-  // Штрихкод WB снизу (если баркод известен), иначе — GTIN текстом.
-  if (barcode) {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    document.body.appendChild(svg);
-    window.JsBarcode(svg, barcode, { format: 'CODE128', displayValue: false, width: 2.5, height: 80, margin: 0, background: '#ffffff', lineColor: '#000000' });
-    const str = new XMLSerializer().serializeToString(svg);
-    document.body.removeChild(svg);
-    const img = new Image();
-    const url = URL.createObjectURL(new Blob([str], { type: 'image/svg+xml' }));
-    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
-    URL.revokeObjectURL(url);
-    const bcW = W - mm(8), bcH = mm(11.3);
-    ctx.drawImage(img, (W - bcW) / 2, mm(25), bcW, bcH);
-    ctx.font = `bold ${Math.round(5.7 * PT)}px Arial`; ctx.textAlign = 'center';
-    ctx.fillText(barcode, W / 2, mm(38));
-  } else {
-    ctx.font = `bold ${Math.round(6 * PT)}px Arial`; ctx.textAlign = 'center';
-    ctx.fillText(`GTIN ${code.slice(2, 16)}`, W / 2, mm(32));
+  // Контроль рамки: сплошные левая и нижняя стороны, пунктир сверху. Не сошлось — не печатаем.
+  const ok = rows.every(r => r[0] === '1') && !rows[n - 1].includes('0') && [...rows[0]].every((b, x) => b === (x % 2 ? '0' : '1'));
+  if (!ok) throw new Error('DataMatrix: рамка символа не распознана');
+  return rows;
+}
+// Штрихи Code128 строкой из '0'/'1' (один символ = один модуль).
+function code128Bits(barcode) {
+  const o = {};
+  window.JsBarcode(o, String(barcode), { format: 'CODE128' });
+  return (o.encodings || []).map(e => e.data).join('');
+}
+const runs = (bits, fn) => { for (let x = 0; x < bits.length;) { if (bits[x] === '1') { let e = x; while (e < bits.length && bits[e] === '1') e++; fn(x, e - x); x = e; } else x++; } };
+
+// Геометрия этикетки в мм: где DataMatrix, подпись кода, штрихкод и колонка текста.
+function kizGeometry(item, matrix) {
+  const n = matrix.length;
+  const m = [0.5, 0.375].find(v => n * v <= 18.5) || Math.max(0.255, 18 / n);
+  const dmSize = n * m;
+  const dmX = snap(LW - 2 - dmSize), dmY = 1.5;
+  const bits = item.barcode ? code128Bits(item.barcode) : '';
+  // Свободные поля по 10 модулей слева и справа — требование Code128.
+  const bm = bits ? ([0.5, 0.375, 0.25].find(v => (bits.length + 20) * v <= LW - 1) || (LW - 1) / (bits.length + 20)) : 0;
+  const barW = bits.length * bm;
+  return { n, m, dmSize, dmX, dmY, bits, bm, barW, barX: snap((LW - barW) / 2), barY: 24.5, barH: 10.5,
+    textX: 2.5, textW: dmX - 1.5 - 2.5, textY0: 1.5, textY1: 22.5,
+    hri: [`(01)${item.code.slice(2, 16)}`, `(21)${item.code.slice(18, 31)}`], hriY: dmY + dmSize + 1.9 };
+}
+
+// Растровый слой текста (без кодов): название (до 2 строк), артикул, размер крупно, бренд, продавец.
+const textLayerCache = new Map();
+function kizTextLayer(item, g) {
+  const key = [item.name, item.article, item.size, item.brand, g.textW.toFixed(3), item.barcode ? 1 : 0].join('\u0000');
+  if (textLayerCache.has(key)) return textLayerCache.get(key);
+  const DPI = 600, MM = DPI / 25.4, PT = DPI / 72;
+  const cvs = document.createElement('canvas'); cvs.width = Math.round(LW * MM); cvs.height = Math.round(LH * MM);
+  const ctx = cvs.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cvs.width, cvs.height); ctx.fillStyle = '#000'; ctx.textBaseline = 'alphabetic';
+  const maxW = g.textW * MM, font = (pt, bold) => { ctx.font = `${bold === false ? '' : 'bold '}${pt * PT}px Arial`; };
+  const fit = (text, pt, min) => { font(pt); while (ctx.measureText(text).width > maxW && pt > min) { pt -= 0.25; font(pt); } return pt; };
+  const clip = text => { if (ctx.measureText(text).width <= maxW) return text; while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1); return text + '…'; };
+  // Название: переносим по словам максимум на 2 строки.
+  const title = String(item.name || '').replace(/\s+/g, ' ').trim();
+  const titlePt = 6.2; font(titlePt);
+  const lines = [];
+  if (title) {
+    let cur = '';
+    for (const w of title.split(' ')) {
+      const t = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(t).width <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
+    }
+    if (cur) lines.push(cur);
+    if (lines.length > 2) { lines[1] = lines.slice(1).join(' '); lines.length = 2; }
+  }
+  const art = `Артикул: ${item.article}`, artPt = fit(art, 8.5, 5.5);
+  const sizeLabel = 'Размер: ', sizePt = 9, sizeValPt = 15;
+  const rows = [
+    ...lines.map(t => ({ h: titlePt, draw: y => { font(titlePt); ctx.fillText(clip(t), g.textX * MM, y); } })),
+    { h: artPt, draw: y => { font(artPt); ctx.fillText(clip(art), g.textX * MM, y); } },
+    { h: sizeValPt * 0.78, draw: y => { font(sizePt); ctx.fillText(sizeLabel, g.textX * MM, y); const x = g.textX * MM + ctx.measureText(sizeLabel).width; font(sizeValPt); ctx.fillText(String(item.size), x, y); } },
+    item.brand ? { h: 6, draw: y => { font(6); ctx.fillText(clip(`Бренд: ${item.brand}`), g.textX * MM, y); } } : null,
+    { h: 6, draw: y => { font(6); ctx.fillText(clip(SELLER_LINE), g.textX * MM, y); } },
+  ].filter(Boolean);
+  const total = rows.reduce((s, r) => s + r.h * PT, 0);
+  const gap = rows.length > 1 ? Math.min(2.2 * MM, ((g.textY1 - g.textY0) * MM - total) / (rows.length - 1)) : 0;
+  let y = g.textY0 * MM;
+  rows.forEach(r => { y += r.h * PT; r.draw(y); y += gap; });
+  const layer = { key: 'kizText' + textLayerCache.size, png: cvs.toDataURL('image/png'), canvas: cvs };
+  textLayerCache.set(key, layer);
+  return layer;
+}
+
+// Одна страница PDF: слой текста + векторные DataMatrix и Code128 + подписи кодов.
+async function drawKizPage(doc, item) {
+  const matrix = await kizMatrix(item.code);
+  const g = kizGeometry(item, matrix);
+  const layer = kizTextLayer(item, g);
+  doc.addImage(layer.png, 'PNG', 0, 0, LW, LH, layer.key, 'FAST');
+  doc.setFillColor(0, 0, 0); doc.setTextColor(0, 0, 0);
+  matrix.forEach((row, y) => runs(row, (x, len) => doc.rect(g.dmX + x * g.m, g.dmY + y * g.m, len * g.m, g.m + 0.01, 'F')));
+  doc.setFont('helvetica', 'normal');
+  let pt = 4.8; doc.setFontSize(pt);
+  while (pt > 3 && Math.max(...g.hri.map(t => doc.getTextWidth(t))) > g.dmSize + 1) { pt -= 0.2; doc.setFontSize(pt); }
+  g.hri.forEach((t, i) => doc.text(t, g.dmX + g.dmSize / 2, g.hriY + i * 1.8, { align: 'center' }));
+  if (g.bits) {
+    runs(g.bits, (x, len) => doc.rect(g.barX + x * g.bm, g.barY, len * g.bm, g.barH, 'F'));
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
+    doc.text(String(item.barcode), LW / 2, g.barY + g.barH + 2.9, { align: 'center' });
+  }
+}
+// Та же этикетка картинкой — для образца на экране (геометрия общая с PDF).
+export async function renderKizLabelPNG(item) {
+  const matrix = await kizMatrix(item.code);
+  const g = kizGeometry(item, matrix);
+  const src = kizTextLayer(item, g).canvas, MM = src.width / LW;
+  const cvs = document.createElement('canvas'); cvs.width = src.width; cvs.height = src.height;
+  const ctx = cvs.getContext('2d');
+  ctx.drawImage(src, 0, 0); ctx.fillStyle = '#000';
+  const R = (x, y, w, h) => ctx.fillRect(Math.round(x * MM), Math.round(y * MM), Math.round((x + w) * MM) - Math.round(x * MM), Math.round((y + h) * MM) - Math.round(y * MM));
+  matrix.forEach((row, y) => runs(row, (x, len) => R(g.dmX + x * g.m, g.dmY + y * g.m, len * g.m, g.m)));
+  ctx.textAlign = 'center';
+  let pt = 4.8; const PT = MM * 25.4 / 72;
+  ctx.font = `${pt * PT}px Arial`;
+  while (pt > 3 && Math.max(...g.hri.map(t => ctx.measureText(t).width)) > (g.dmSize + 1) * MM) { pt -= 0.2; ctx.font = `${pt * PT}px Arial`; }
+  g.hri.forEach((t, i) => ctx.fillText(t, (g.dmX + g.dmSize / 2) * MM, (g.hriY + i * 1.8) * MM));
+  if (g.bits) {
+    runs(g.bits, (x, len) => R(g.barX + x * g.bm, g.barY, len * g.bm, g.barH));
+    ctx.font = `bold ${7.5 * PT}px Arial`;
+    ctx.fillText(String(item.barcode), LW / 2 * MM, (g.barY + g.barH + 2.9) * MM);
   }
   return cvs.toDataURL('image/png');
 }
 
-async function makeLabelsPdf(items, onProgress) {
+export async function makeLabelsPdf(items, onProgress) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit: 'mm', format: [58, 40], orientation: 'landscape' });
+  const doc = new jsPDF({ unit: 'mm', format: [LW, LH], orientation: 'landscape', compress: true });
   for (let i = 0; i < items.length; i++) {
-    if (i) doc.addPage([58, 40], 'landscape');
-    doc.addImage(await renderKizLabelPNG(items[i]), 'PNG', 0, 0, 58, 40);
-    if (onProgress && i % 10 === 0) onProgress(`Готовлю этикетки… ${i + 1}/${items.length}`);
+    if (i) doc.addPage([LW, LH], 'landscape');
+    await drawKizPage(doc, items[i]);
+    if (onProgress && i % 25 === 0) { onProgress(`Готовлю этикетки… ${i + 1}/${items.length}`); await new Promise(r => setTimeout(r, 0)); }
   }
   return doc;
 }
+
 // Шаблон файла с кизами (xlsx): те же колонки, что понимает разбор, + строки-примеры.
 export function downloadKizTemplate() {
   const XLSX = window.XLSX;
@@ -283,6 +361,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
   const [printArt, setPrintArt] = useState('');
   const [qtys, setQtys] = useState({});
   const [boxes, setBoxes] = useState(1);
+  const [sample, setSample] = useState(''); // образец этикетки (картинка), код при этом не списывается
   const [retJob, setRetJob] = useState(null); // { job, items, checked: Set }
 
   useEffect(() => { (async () => {
@@ -415,6 +494,8 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
     if (!printEntry || !needTotal) { alert('Укажи, сколько этикеток печатать по размерам.'); return; }
     const short = printSizes.filter(z => (Number(qtys[z]) || 0) > printEntry.sizes[z].free);
     if (short.length) { alert('Не хватает кизов: ' + short.map(z => `р.${z} — нужно ${qtys[z]}, свободно ${printEntry.sizes[z].free}`).join('; ')); return; }
+    const noBc = printSizes.filter(z => (Number(qtys[z]) || 0) > 0 && !barcodeFor(printCard, z));
+    if (noBc.length && !window.confirm(`У размеров ${noBc.join(', ')} нет баркода WB в каталоге — этикетки напечатаются только с Честным Знаком, без штрихкода товара. Печатать?`)) return;
     setBusy('Готовлю печать…');
     try {
       const store = await kvGet(keyArt(printArt));
@@ -444,6 +525,20 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
       setIndex(idx); setJobs(nj); setQtys({});
       openPrint(doc);
     } catch (err) { console.error(err); alert('Ошибка печати: ' + (err.message || err)); }
+    finally { setBusy(''); }
+  }
+  // Образец: первая этикетка так, как она напечатается. Киз не списывается.
+  async function showSample() {
+    if (!printEntry) return;
+    setBusy('Готовлю образец…');
+    try {
+      const store = await kvGet(keyArt(printArt));
+      const has = z => store && store.sizes[z] && store.sizes[z].codes.length;
+      const z = printSizes.find(x => (Number(qtys[x]) || 0) > 0 && has(x)) || printSizes.find(has);
+      if (!z) { alert('Свободных кизов у артикула нет — образец показать не на чем.'); return; }
+      setSample(await renderKizLabelPNG({ size: z, gtin: store.sizes[z].gtin, barcode: barcodeFor(printCard, z), code: store.sizes[z].codes[0],
+        name: printCard ? printCard.name : '', article: printArt, brand: printEntry.brand || (printCard ? printCard.brand : '') }));
+    } catch (err) { console.error(err); alert('Ошибка: ' + (err.message || err)); }
     finally { setBusy(''); }
   }
   async function reprint(job) {
@@ -593,7 +688,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
               <td style={{ ...td, textAlign: 'right', fontWeight: 600 }} className="skl-mono">{free}</td>
               <td style={{ ...td, textAlign: 'right', color: 'var(--ink-soft)' }} className="skl-mono">{pr}</td>
               <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                <button className="skl-btn skl-btn-ghost" style={{ padding: '4px 8px' }} onClick={() => { setPrintArt(a); setQtys({}); }}><Printer size={12} /> Печать</button>{' '}
+                <button className="skl-btn skl-btn-ghost" style={{ padding: '4px 8px' }} onClick={() => { setPrintArt(a); setQtys({}); setSample(''); }}><Printer size={12} /> Печать</button>{' '}
                 <button className="skl-btn skl-btn-ghost" style={{ padding: '4px 8px', color: 'var(--negative)' }} title="Удалить все свободные кизы артикула" onClick={() => deleteArticle(a)}><Trash2 size={12} /></button>
               </td>
             </tr>; })}</tbody>
@@ -603,10 +698,10 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
 
     <Section title="Печать этикеток с Честным Знаком" icon={<Printer size={18} />} open collapsible={false}>
       <p style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 0, marginBottom: 12 }}>
-        Одна этикетка 58×40 на пару: название, артикул, размер, бренд, штрихкод WB и DataMatrix Честного Знака.
+        Одна этикетка 58×40 на пару: название, артикул, размер, бренд, штрихкод WB и DataMatrix Честного Знака с подписью кода (GTIN и серийный номер). Коды печатаются вектором под шаг термопринтера — печатай в масштабе 100% («Фактический размер»).
         Заполни количество по размерам вручную или по коробам (8 пар по сетке из «Этикеток»). Напечатанные кизы списываются с остатка.
       </p>
-      <ArticleCombobox value={printArt} onChange={v => { setPrintArt(v); setQtys({}); }} options={arts}
+      <ArticleCombobox value={printArt} onChange={v => { setPrintArt(v); setQtys({}); setSample(''); }} options={arts}
         names={Object.fromEntries(arts.map(a => [a, index[a].brand || '']))} placeholder="Выбери артикул с кизами…" />
       {printEntry && <div style={{ marginTop: 14 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
@@ -625,8 +720,13 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="skl-btn skl-btn-primary" disabled={!needTotal || !!busy} onClick={doPrint}><Printer size={14} /> Напечатать {needTotal} шт.</button>
+          <button className="skl-btn skl-btn-ghost" disabled={!!busy} onClick={showSample}>Образец этикетки</button>
           {busyRow}
         </div>
+        {sample && <div style={{ marginTop: 12 }}>
+          <img src={sample} alt="Образец этикетки" style={{ width: 'min(464px, 100%)', display: 'block', background: '#fff', borderRadius: 6, border: '1px solid var(--line)' }} />
+          <div style={{ ...soft, marginTop: 4 }}>Образец в масштабе 58×40 мм. Киз при показе образца не списывается.</div>
+        </div>}
       </div>}
     </Section>
 
