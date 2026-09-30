@@ -50,12 +50,69 @@ const kvSet = (k, v) => window.storage.set(k, JSON.stringify(v));
 // Ищем строку заголовков и колонки: код (полный с GS предпочтительнее), артикул, размер,
 // бренд, GTIN. Если колонок артикул/размер нет — строки помечаются и размер берётся по GTIN
 // из уже загруженных кизов (index).
-export function parseKizFile(buf, { canonArticle, index }) {
-  const XLSX = window.XLSX;
-  const wb = XLSX.read(buf, { type: 'array', raw: true });
-  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: true });
-  let hdrIdx = rows.findIndex(r => r.some(c => /gtin|код идентификации|^ки$|артикул/i.test(String(c))));
-  const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(c => String(c).toLowerCase()) : [];
+// Полный код маркировки целиком в одном поле (для выбора разделителя CSV).
+const FULL_KIZ = /^01\d{14}21.{13}(\u001d?91.{4}\u001d?92.+)?$/s;
+// CSV по RFC 4180: поле в кавычках может содержать разделитель, кавычка внутри удваивается.
+// Это важно: в серийном номере Честного Знака встречаются и «;», и «,», и «"».
+function csvRows(text, delim) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += ch;
+    } else if (ch === '"' && cur === '') q = true;
+    else if (delim && ch === delim) { row.push(cur); cur = ''; }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = ''; rows.push(row); row = [];
+    } else cur += ch;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+function parseCsvText(text) {
+  text = text.replace(/^\uFEFF/, '');
+  const head = text.slice(0, 60000);
+  // Разделитель — тот, при котором в большинстве строк есть ≥2 поля и одно из них — код целиком.
+  let best = '', bestScore = 0, total = 1;
+  for (const d of [';', '\t', ',']) {
+    const rows = csvRows(head, d).slice(0, 200).filter(r => r.some(c => c.trim() !== ''));
+    total = Math.max(total, rows.length);
+    const score = rows.filter(r => r.length >= 2 && r.some(c => FULL_KIZ.test(c.trim()))).length;
+    if (score > bestScore) { best = d; bestScore = score; }
+  }
+  // Один столбец (только коды) — разделителя нет, строка = поле.
+  return csvRows(text, bestScore >= total * 0.5 ? best : '');
+}
+function fileRows(buf) {
+  const u8 = new Uint8Array(buf);
+  const isXlsx = u8[0] === 0x50 && u8[1] === 0x4b, isXls = u8[0] === 0xd0 && u8[1] === 0xcf;
+  if (isXlsx || isXls) {
+    const XLSX = window.XLSX;
+    const wb = XLSX.read(buf, { type: 'array', raw: true });
+    return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: true });
+  }
+  let text = new TextDecoder('utf-8').decode(u8);
+  if (text.includes('\uFFFD')) text = new TextDecoder('windows-1251').decode(u8); // CSV из Excel в кириллической кодировке
+  return parseCsvText(text);
+}
+
+// ── Разбор файла с кизами ───────────────────────────────────────────────────────
+// Понимает три вида файлов:
+//   1) выгрузка из ЛК Честного Знака (xlsx): код, GTIN, артикул, размер, товарный знак;
+//   2) шаблон: Артикул · Размер · Бренд · GTIN · Код маркировки;
+//   3) CSV/xlsx «баркод WB ; код маркировки» (можно без заголовка) — артикул и размер
+//      берутся из каталога WB по баркоду (barcodeMap).
+// Если нет ни артикула/размера, ни баркода — размер берётся по GTIN из уже загруженных кизов.
+export function parseKizFile(buf, { canonArticle, index, barcodeMap }) {
+  const rows = fileRows(buf);
+  const isKiz = c => !!parseKizCode(c);
+  const HDR = /gtin|код идентификации|^ки$|артикул|баркод|штрихкод|^шк$|код маркировки|barcode/i;
+  // Заголовок ищем только в первых строках и только там, где нет самих кодов
+  // (в криптохвосте кода случайно может встретиться что угодно).
+  const hdrIdx = rows.slice(0, 10).findIndex(r => !r.some(isKiz) && r.some(c => String(c).length < 60 && HDR.test(String(c).trim())));
+  const hdr = hdrIdx >= 0 ? rows[hdrIdx].map(c => String(c).trim().toLowerCase()) : [];
   const body = rows.slice(hdrIdx + 1).filter(r => r.some(c => String(c).trim() !== ''));
   const findCol = re => hdr.findIndex(h => re.test(h));
   // Колонка с кодом: та, где встречается GS (полный код), иначе — где коды разбираются.
@@ -63,11 +120,17 @@ export function parseKizFile(buf, { canonArticle, index }) {
   const width = Math.max(...sample.map(r => r.length), 0);
   let codeCol = -1;
   for (let c = 0; c < width && codeCol < 0; c++) if (sample.some(r => String(r[c]).includes(GS) || /\\u001d/i.test(String(r[c])))) codeCol = c;
-  if (codeCol < 0) for (let c = 0; c < width && codeCol < 0; c++) if (sample.filter(r => parseKizCode(r[c])).length >= Math.max(1, sample.length * 0.6)) codeCol = c;
+  if (codeCol < 0) for (let c = 0; c < width && codeCol < 0; c++) if (sample.filter(r => isKiz(r[c])).length >= Math.max(1, sample.length * 0.6)) codeCol = c;
   if (codeCol < 0) throw new Error('Не нашёл колонку с кодами маркировки (01…21…). Проверь файл.');
   const artCol = findCol(/артикул/), sizeCol = findCol(/размер/), brandCol = findCol(/товарный знак|бренд/), gtinCol = findCol(/^gtin/), nameCol = findCol(/наименование/);
+  // Колонка с баркодом WB: по заголовку, иначе — где в большинстве строк 12–14 цифр.
+  let bcCol = findCol(/баркод|штрихкод|^шк$|barcode|^ean/);
+  if (bcCol < 0) for (let c = 0; c < width && bcCol < 0; c++) {
+    if (c === codeCol || c === gtinCol) continue;
+    if (sample.filter(r => /^\d{12,14}$/.test(String(r[c]).trim())).length >= Math.max(1, sample.length * 0.6)) bcCol = c;
+  }
   const gtinOwner = {}; // GTIN → { article, size } из уже загруженного остатка
-  Object.entries(index || {}).forEach(([a, v]) => Object.entries(v.sizes || {}).forEach(([s, x]) => { if (x.gtin) gtinOwner[x.gtin] = { article: a, size: s }; }));
+  Object.entries(index || {}).forEach(([a, v]) => Object.entries(v.sizes || {}).forEach(([z, x]) => { if (x.gtin) gtinOwner[x.gtin] = { article: a, size: z }; }));
   const out = [], errors = [];
   body.forEach((r, i) => {
     const k = parseKizCode(r[codeCol]);
@@ -76,15 +139,40 @@ export function parseKizFile(buf, { canonArticle, index }) {
     if (gtinCol >= 0 && String(r[gtinCol]).trim() && String(r[gtinCol]).trim().padStart(14, '0') !== k.gtin) { errors.push({ row: rowNo, reason: 'GTIN в колонке не совпадает с GTIN в коде', value: k.key }); return; }
     let article = artCol >= 0 ? canonArticle(String(r[artCol]).trim()) : '';
     let size = sizeCol >= 0 ? String(r[sizeCol]).trim() : '';
+    let brand = brandCol >= 0 ? String(r[brandCol]).trim() : '';
+    let name = nameCol >= 0 ? String(r[nameCol]).trim() : '';
+    const bc = bcCol >= 0 ? String(r[bcCol]).trim() : '';
+    if ((!article || !size) && bc) {
+      const o = (barcodeMap || {})[bc];
+      if (!o) { errors.push({ row: rowNo, reason: `баркод ${bc} не найден в каталоге WB — синхронизируй каталог в «Этикетках»`, value: k.key }); return; }
+      if (o.ambiguous) { errors.push({ row: rowNo, reason: `баркод ${bc} есть в нескольких карточках WB с разным артикулом/размером`, value: k.key }); return; }
+      article = article || o.article; size = size || o.size; brand = brand || o.brand; name = name || o.name;
+    }
     if (!article || !size) {
       const o = gtinOwner[k.gtin];
       if (o) { article = article || o.article; size = size || o.size; }
     }
-    if (!article || !size) { errors.push({ row: rowNo, reason: 'нет артикула/размера и GTIN ещё не известен', value: k.gtin }); return; }
+    if (!article || !size) { errors.push({ row: rowNo, reason: 'нет артикула/размера, баркода WB, и GTIN ещё не известен', value: k.gtin }); return; }
     if (!k.wb.includes(GS)) errors.push({ row: rowNo, reason: 'код без криптохвоста (91/92) — WB может не принять', value: k.key, warn: true });
-    out.push({ code: k.wb, key: k.key, gtin: k.gtin, article, size, brand: brandCol >= 0 ? String(r[brandCol]).trim() : '', name: nameCol >= 0 ? String(r[nameCol]).trim() : '' });
+    out.push({ code: k.wb, key: k.key, gtin: k.gtin, article, size, brand, name, row: rowNo });
   });
-  return { rows: out, errors, codeHasGs: sample.some(r => String(r[codeCol]).includes(GS)) };
+  // Один GTIN = один артикул и размер. Если в файле GTIN «разъехался» по двум размерам
+  // (ошибка в баркоде строки) или спорит с уже загруженным остатком — такие строки не берём.
+  const byGtin = {};
+  out.forEach(r => { const t = r.article + '\u0000' + r.size; ((byGtin[r.gtin] = byGtin[r.gtin] || {})[t] = (byGtin[r.gtin][t] || 0) + 1); });
+  const rightFor = {};
+  Object.entries(byGtin).forEach(([g, m]) => {
+    const own = gtinOwner[g];
+    rightFor[g] = own ? own.article + '\u0000' + own.size : Object.entries(m).sort((x, y) => y[1] - x[1])[0][0];
+  });
+  const good = out.filter(r => {
+    const t = r.article + '\u0000' + r.size;
+    if (t === rightFor[r.gtin]) return true;
+    const [a, z] = rightFor[r.gtin].split('\u0000');
+    errors.push({ row: r.row, reason: `GTIN ${r.gtin} относится к ${a} р.${z}, а строка указывает на ${r.article} р.${r.size} — пропущена`, value: r.key });
+    return false;
+  });
+  return { rows: good, errors, codeHasGs: sample.some(r => String(r[codeCol]).includes(GS)), format: artCol >= 0 && sizeCol >= 0 ? 'columns' : bcCol >= 0 ? 'barcode' : 'gtin' };
 }
 
 // ── Этикетка 58×40: наша этикетка + DataMatrix Честного Знака ───────────────────
@@ -205,12 +293,24 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
 
   // Карточка WB для артикула (учитывая бренд из ЧЗ) — имя и баркоды по размерам.
   function wbCard(article, brand) {
-    const entries = Object.entries(labelArticles || {}).filter(([, v]) => v.code === article);
+    const entries = Object.entries(labelArticles || {}).filter(([, v]) => v.code === article || canonArticle(v.code) === article);
     if (!entries.length) return null;
     const b = String(brand || '').toLowerCase();
     const hit = entries.find(([, v]) => b && String(v.brand || '').toLowerCase() === b) || entries[0];
     return { key: hit[0], ...hit[1] };
   }
+  // Баркод WB → артикул и размер (для файлов вида «баркод;код маркировки»).
+  const barcodeMap = useMemo(() => {
+    const m = {};
+    Object.values(labelArticles || {}).forEach(v => (v.sizes || []).forEach(z => {
+      if (!z.barcode) return;
+      const o = { article: canonArticle(v.code), size: String(z.size), brand: v.brand || '', name: v.name || '' };
+      const prev = m[z.barcode];
+      if (prev && (prev.article !== o.article || prev.size !== o.size)) m[z.barcode] = { ...prev, ambiguous: true };
+      else if (!prev) m[z.barcode] = o;
+    }));
+    return m;
+  }, [labelArticles]);
   const barcodeFor = (card, size) => { const s = card && card.sizes.find(x => String(x.size) === String(size)); return s ? s.barcode : ''; };
 
   // ── Загрузка файла ──
@@ -220,7 +320,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
     setBusy('Читаю файл…');
     try {
       const buf = await file.arrayBuffer();
-      const { rows, errors } = parseKizFile(buf, { canonArticle, index });
+      const { rows, errors } = parseKizFile(buf, { canonArticle, index, barcodeMap });
       // Сверяем с уже загруженными кизами каждого артикула (дубли, GTIN размера).
       const byArt = {};
       rows.forEach(r => { (byArt[r.article] = byArt[r.article] || []).push(r); });
@@ -429,6 +529,8 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
           <li><b>Проще всего</b> — выгрузка кодов из Честного Знака как есть (файл вида «… ALL.xlsx»): в ней уже есть
             «КИ (код идентификации)», полный код с разделителями, «GTIN», «Модель / артикул производителя»,
             «Размер в штихмассовой системе», «Товарный знак». Ничего править не нужно.</li>
+          <li><b>Или файл «баркод WB ; код маркировки»</b> (csv, без заголовка) — в первой колонке баркод товара из карточки WB,
+            во второй полный код. Артикул и размер ВМС возьмёт сама по баркоду из каталога WB — перед загрузкой синхронизируй каталог в «Этикетках».</li>
           <li><b>Или по шаблону</b> — скачай его ниже и заполни: <span className="skl-mono">Артикул · Размер · Бренд · GTIN · Код маркировки</span>.
             Одна строка = один код. Строки-примеры из шаблона удали.</li>
           <li><b>Артикул</b> пиши так же, как он записан в ВМС (например <span className="skl-mono">105-3</span>), <b>размер</b> — цифрами (<span className="skl-mono">36</span>). Без размера код не примется.</li>
