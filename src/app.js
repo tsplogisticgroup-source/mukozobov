@@ -1,5 +1,6 @@
 import { DUCK_VB, DUCK_PATH } from './duck.js';
 import { KizTab, parseKizCode } from './kiz.jsx';
+import { OzonTab } from './ozon.jsx';
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -3959,7 +3960,7 @@ function SkladLedger() {
       /*#__PURE__*/React.createElement("circle", { key: 4, cx: 17, cy: 18, r: 2 }) ]) },
     ...(role === 'fulfillment' ? [{ key: 'fbs', label: 'FBS · сборка', icon: /*#__PURE__*/React.createElement(Printer, { size: 17 }) }] : []),
     { key: 'tz', label: 'ТЗ на отгрузку', icon: /*#__PURE__*/React.createElement(ClipboardList, { size: 17 }) },
-    ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }, { key: 'kiz', label: 'Честный Знак', icon: /*#__PURE__*/React.createElement(ShieldCheck, { size: 17 }) }] : []),
+    ...(role === 'fulfillment' ? [{ key: 'labels', label: 'Этикетки', icon: /*#__PURE__*/React.createElement(Tag, { size: 17 }) }, { key: 'kiz', label: 'Честный Знак', icon: /*#__PURE__*/React.createElement(ShieldCheck, { size: 17 }) }, { key: 'ozon', label: 'Ozon', icon: /*#__PURE__*/React.createElement(Box, { size: 17 }) }] : []),
     { key: 'reports', label: 'Отчёты', icon: svgIcon([
       /*#__PURE__*/React.createElement("path", { key: 1, d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }),
       /*#__PURE__*/React.createElement("polyline", { key: 2, points: "14 2 14 8 20 8" }),
@@ -4943,6 +4944,12 @@ function SkladLedger() {
     key: 'kiz',
     label: 'Честный Знак',
     icon: /*#__PURE__*/React.createElement(ShieldCheck, {
+      size: 16
+    })
+  }, {
+    key: 'ozon',
+    label: 'Ozon',
+    icon: /*#__PURE__*/React.createElement(Box, {
       size: 16
     })
   }] : []), {
@@ -6139,7 +6146,10 @@ function SkladLedger() {
       onClick: startPrintBySize
     }, /*#__PURE__*/React.createElement(Printer, { size: 14 }), " Печать"), /*#__PURE__*/React.createElement("span", {
       style: { fontSize: 12, color: 'var(--ink-soft)' }
-    }, "Итого: ", [...labelArticles[printArticle].sizes].reduce((t, s) => t + (Number(printQtys[String(s.size)]) || 0), 0), " шт."))))), activeTab === 'kiz' && /*#__PURE__*/React.createElement(KizTab, {
+    }, "Итого: ", [...labelArticles[printArticle].sizes].reduce((t, s) => t + (Number(printQtys[String(s.size)]) || 0), 0), " шт."))))), activeTab === 'ozon' && /*#__PURE__*/React.createElement(OzonTab, {
+    Section, ArticleCombobox,
+    icons: { Printer, Download, Trash2, Loader2, AlertTriangle, RefreshCcw, Tag }
+  }), activeTab === 'kiz' && /*#__PURE__*/React.createElement(KizTab, {
     Section, ArticleCombobox, labelArticles, gridVector, canonArticle,
     learnGtinMany: learnFbsGtinMany,
     icons: { Printer, Upload, Download, Trash2, Loader2, AlertTriangle, RefreshCcw }

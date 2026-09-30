@@ -10,9 +10,16 @@
 //   • PATCH /fbs/supplies/{id}/deliver      — отгрузить поставку.
 //   • GET  /fbs/supplies/{id}/barcode?type=png — ШК/QR короба поставки.
 //
+//   • GET  /ozon/cabinets          — список подключённых кабинетов Ozon (без ключей).
+//   • GET  /ozon/catalog?cab=1     — карточки кабинета Ozon: артикул, штрихкоды, размер, бренд, цвет.
+//
 // Секреты воркера (Settings → Variables and Secrets):
 //   WB_TOKEN    — токен Контент (для каталога/этикеток).
 //   WB_MP_TOKEN — токен «Маркетплейс» (для FBS).
+//   Ozon, по набору на кабинет (N = 1…10):
+//     OZON1_CLIENT_ID, OZON1_API_KEY — из кабинета Ozon Seller → Настройки → Seller API (роль «Товары», можно только чтение).
+//     OZON1_NAME — название кабинета для ВМС (необязательно, обычная переменная).
+//     Второй кабинет — OZON2_CLIENT_ID, OZON2_API_KEY, OZON2_NAME и т.д.
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -47,6 +54,31 @@ async function proxy(wbUrl, method, mpToken, body) {
 }
 
 const MP = 'https://marketplace-api.wildberries.ru';
+
+// ── Ozon Seller API ────────────────────────────────────────────────────────────
+const OZON = 'https://api-seller.ozon.ru';
+// Кабинеты берём из секретов OZON{N}_CLIENT_ID / OZON{N}_API_KEY.
+function ozonCabinets(env) {
+  const out = [];
+  for (let i = 1; i <= 10; i++) {
+    const clientId = env[`OZON${i}_CLIENT_ID`], apiKey = env[`OZON${i}_API_KEY`];
+    if (clientId && apiKey) out.push({ id: String(i), name: env[`OZON${i}_NAME`] || `Кабинет ${i}`, clientId: String(clientId).trim(), apiKey: String(apiKey).trim() });
+  }
+  return out;
+}
+async function ozonCall(cab, path, body) {
+  const res = await fetch(OZON + path, {
+    method: 'POST',
+    headers: { 'Client-Id': cab.clientId, 'Api-Key': cab.apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Ozon ${path} → ${res.status}: ${text.slice(0, 300)}`);
+  return text ? JSON.parse(text) : {};
+}
+// Запасные названия атрибутов по id — если справочник категории не ответил.
+const OZON_ATTR_NAMES = { 85: 'Бренд', 4298: 'Российский размер', 4295: 'Российский размер', 9533: 'Размер производителя', 9024: 'Артикул', 9048: 'Название модели', 8292: 'Объединить на одной карточке', 10096: 'Цвет товара' };
+const OZON_ATTR_KEEP = /бренд|размер|артикул|модел|цвет|объединить/i;
 
 export default {
   async fetch(request, env) {
@@ -125,6 +157,60 @@ export default {
         return json({ error: `Неизвестный FBS-маршрут: ${request.method} ${path}` }, 404);
       } catch (e) {
         return json({ error: String((e && e.message) || e) }, 500);
+      }
+    }
+
+    // ── Ozon: кабинеты и каталог карточек ─────────────────────────────────────
+    if (path.startsWith('/ozon/')) {
+      const cabs = ozonCabinets(env);
+      try {
+        if (path === '/ozon/cabinets') {
+          return json({ cabinets: cabs.map(c => ({ id: c.id, name: c.name })) });
+        }
+        if (path === '/ozon/catalog') {
+          const cab = cabs.find(c => c.id === (url.searchParams.get('cab') || '1'));
+          if (!cab) return json({ error: 'Кабинет Ozon не найден. Добавь в настройках воркера секреты OZON1_CLIENT_ID и OZON1_API_KEY.' }, 404);
+          const sample = url.searchParams.get('sample'); // диагностика: сырые первые карточки
+          const raw = [];
+          let lastId = '';
+          for (let page = 0; page < 40; page++) {
+            const data = await ozonCall(cab, '/v4/product/info/attributes', { filter: { visibility: 'ALL' }, limit: sample ? 5 : 1000, last_id: lastId, sort_dir: 'ASC' });
+            const items = data.result || data.items || [];
+            raw.push(...items);
+            lastId = data.last_id || '';
+            if (sample || !items.length || !lastId || items.length < 1000) break;
+          }
+          // Названия атрибутов — из справочника категории (по одному запросу на пару категория+тип).
+          const names = { ...OZON_ATTR_NAMES };
+          const pairs = new Map();
+          for (const it of raw) {
+            if (it.description_category_id && it.type_id) pairs.set(`${it.description_category_id}:${it.type_id}`, [it.description_category_id, it.type_id]);
+          }
+          let n = 0;
+          for (const [catId, typeId] of pairs.values()) {
+            if (++n > 20) break;
+            try {
+              const a = await ozonCall(cab, '/v1/description-category/attribute', { description_category_id: catId, type_id: typeId, language: 'DEFAULT' });
+              for (const x of (a.result || [])) if (x.id && x.name) names[x.id] = x.name;
+            } catch (_) { /* останутся запасные названия */ }
+          }
+          if (sample) return json({ cabinet: { id: cab.id, name: cab.name }, names: Object.fromEntries(Object.entries(names).filter(([, v]) => OZON_ATTR_KEEP.test(v))), raw });
+          const products = raw.map(it => {
+            const attrs = {};
+            for (const a of (it.attributes || [])) {
+              const name = names[a.id];
+              if (!name || !OZON_ATTR_KEEP.test(name)) continue;
+              const v = (a.values || []).map(x => x.value).filter(Boolean).join(', ');
+              if (v && !attrs[name]) attrs[name] = v;
+            }
+            const barcodes = (it.barcodes && it.barcodes.length ? it.barcodes : (it.barcode ? [it.barcode] : [])).map(String).filter(Boolean);
+            return { id: it.id, offerId: String(it.offer_id || ''), name: it.name || '', sku: it.sku || null, barcodes, attrs };
+          });
+          return json({ cabinet: { id: cab.id, name: cab.name }, products, count: products.length, syncedAt: new Date().toISOString() });
+        }
+        return json({ error: `Неизвестный Ozon-маршрут: ${request.method} ${path}` }, 404);
+      } catch (e) {
+        return json({ error: String((e && e.message) || e) }, 502);
       }
     }
 
