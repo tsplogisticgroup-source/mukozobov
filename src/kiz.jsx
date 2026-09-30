@@ -176,14 +176,15 @@ export function parseKizFile(buf, { canonArticle, index, barcodeMap }) {
 }
 
 // ── Этикетка 58×40: наша этикетка + DataMatrix Честного Знака ───────────────────
-// Оба кода кладутся в PDF ВЕКТОРОМ (прямоугольниками), а не картинкой: принтер печатает
-// их с ровными краями при любом разрешении. Размер модуля и координаты кратны точке
-// термопринтера 203 dpi (0,125 мм): DataMatrix — 3 точки на модуль (0,375 мм; у Честного
-// Знака минимум 0,255 мм), Code128 — 3 точки на штрих. Текст — растровый слой 600 dpi
-// (кириллица), одинаковый для всех этикеток одного размера, поэтому в PDF он лежит один раз.
+// Макет: сверху слева — текст в две колонки (название; Артикул / Размер / Бренд; продавец),
+// сверху справа — DataMatrix 22 мм с подписью (01)GTIN и (21)серийный, снизу под линией —
+// штрихкод WB на всю ширину. Оба кода кладутся в PDF ВЕКТОРОМ (прямоугольниками), размер
+// модуля и координаты кратны точке термопринтера 203 dpi (0,125 мм): DataMatrix — 4 точки
+// на модуль (0,5 мм), Code128 — 3 точки на штрих. Текст — растровый слой 600 dpi
+// (кириллица), общий для всех этикеток одного размера, поэтому в PDF он лежит один раз.
 const LW = 58, LH = 40, DOT = 0.125;
 const snap = v => Math.round(v / DOT) * DOT;
-const SELLER_LINE = 'ИП: Мукозобов Д.В.';
+const SELLER_LINE = 'ИП Мукозобов Д.В.';
 let bwipMod = null;
 async function bwip() {
   if (!bwipMod) { const m = await import('bwip-js'); bwipMod = m.toCanvas ? m : m.default; }
@@ -219,22 +220,22 @@ function code128Bits(barcode) {
 }
 const runs = (bits, fn) => { for (let x = 0; x < bits.length;) { if (bits[x] === '1') { let e = x; while (e < bits.length && bits[e] === '1') e++; fn(x, e - x); x = e; } else x++; } };
 
-// Геометрия этикетки в мм: где DataMatrix, подпись кода, штрихкод и колонка текста.
+// Геометрия этикетки в мм.
 function kizGeometry(item, matrix) {
   const n = matrix.length;
-  const m = [0.5, 0.375].find(v => n * v <= 18.5) || Math.max(0.255, 18 / n);
+  const m = [0.5, 0.375].find(v => n * v <= 22) || Math.max(0.255, 22 / n);
   const dmSize = n * m;
   const dmX = snap(LW - 2 - dmSize), dmY = 1.5;
   const bits = item.barcode ? code128Bits(item.barcode) : '';
   // Свободные поля по 10 модулей слева и справа — требование Code128.
   const bm = bits ? ([0.5, 0.375, 0.25].find(v => (bits.length + 20) * v <= LW - 1) || (LW - 1) / (bits.length + 20)) : 0;
   const barW = bits.length * bm;
-  return { n, m, dmSize, dmX, dmY, bits, bm, barW, barX: snap((LW - barW) / 2), barY: 24.5, barH: 10.5,
-    textX: 2.5, textW: dmX - 1.5 - 2.5, textY0: 1.5, textY1: 22.5,
-    hri: [`(01)${item.code.slice(2, 16)}`, `(21)${item.code.slice(18, 31)}`], hriY: dmY + dmSize + 1.9 };
+  return { n, m, dmSize, dmX, dmY, bits, bm, barW, barX: snap((LW - barW) / 2), barY: 28.8, barH: 7, digitsY: 38.6, ruleY: 27.8,
+    textX: 2.5, textW: dmX - 1.5 - 2.5, textY0: 2, textY1: 26.5,
+    hri: [`(01)${item.code.slice(2, 16)}`, `(21)${item.code.slice(18, 31)}`], hriY: dmY + dmSize + 1.8, hriStep: 1.7, hriPt: 4.4 };
 }
 
-// Растровый слой текста (без кодов): название (до 2 строк), артикул, размер крупно, бренд, продавец.
+// Растровый слой текста (без кодов). Один шрифт: Arial bold 7 pt; крупнее только цифра размера.
 const textLayerCache = new Map();
 function kizTextLayer(item, g) {
   const key = [item.name, item.article, item.size, item.brand, g.textW.toFixed(3), item.barcode ? 1 : 0].join('\u0000');
@@ -243,15 +244,14 @@ function kizTextLayer(item, g) {
   const cvs = document.createElement('canvas'); cvs.width = Math.round(LW * MM); cvs.height = Math.round(LH * MM);
   const ctx = cvs.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cvs.width, cvs.height); ctx.fillStyle = '#000'; ctx.textBaseline = 'alphabetic';
-  const maxW = g.textW * MM, font = (pt, bold) => { ctx.font = `${bold === false ? '' : 'bold '}${pt * PT}px Arial`; };
-  const fit = (text, pt, min) => { font(pt); while (ctx.measureText(text).width > maxW && pt > min) { pt -= 0.25; font(pt); } return pt; };
-  const clip = text => { if (ctx.measureText(text).width <= maxW) return text; while (text.length > 1 && ctx.measureText(text + '…').width > maxW) text = text.slice(0, -1); return text + '…'; };
-  // Название: переносим по словам максимум на 2 строки.
+  const X = g.textX * MM, maxW = g.textW * MM, BODY = 7, SIZE_PT = 13, KEY_W = 13 * MM;
+  const font = pt => { ctx.font = `bold ${pt * PT}px Arial`; };
+  const clip = (text, w) => { if (ctx.measureText(text).width <= w) return text; while (text.length > 1 && ctx.measureText(text + '…').width > w) text = text.slice(0, -1); return text + '…'; };
+  // Название: до двух строк, переносим по словам.
   const title = String(item.name || '').replace(/\s+/g, ' ').trim();
-  const titlePt = 6.2; font(titlePt);
   const lines = [];
   if (title) {
-    let cur = '';
+    font(BODY); let cur = '';
     for (const w of title.split(' ')) {
       const t = cur ? cur + ' ' + w : w;
       if (ctx.measureText(t).width <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
@@ -259,19 +259,20 @@ function kizTextLayer(item, g) {
     if (cur) lines.push(cur);
     if (lines.length > 2) { lines[1] = lines.slice(1).join(' '); lines.length = 2; }
   }
-  const art = `Артикул: ${item.article}`, artPt = fit(art, 8.5, 5.5);
-  const sizeLabel = 'Размер: ', sizePt = 9, sizeValPt = 15;
+  const kv = (k, v, pt) => y => { font(BODY); ctx.fillText(k, X, y); font(pt || BODY); ctx.fillText(clip(v, maxW - KEY_W), X + KEY_W, y); };
   const rows = [
-    ...lines.map(t => ({ h: titlePt, draw: y => { font(titlePt); ctx.fillText(clip(t), g.textX * MM, y); } })),
-    { h: artPt, draw: y => { font(artPt); ctx.fillText(clip(art), g.textX * MM, y); } },
-    { h: sizeValPt * 0.78, draw: y => { font(sizePt); ctx.fillText(sizeLabel, g.textX * MM, y); const x = g.textX * MM + ctx.measureText(sizeLabel).width; font(sizeValPt); ctx.fillText(String(item.size), x, y); } },
-    item.brand ? { h: 6, draw: y => { font(6); ctx.fillText(clip(`Бренд: ${item.brand}`), g.textX * MM, y); } } : null,
-    { h: 6, draw: y => { font(6); ctx.fillText(clip(SELLER_LINE), g.textX * MM, y); } },
+    ...lines.map(t => ({ h: BODY, draw: y => { font(BODY); ctx.fillText(clip(t, maxW), X, y); } })),
+    { h: BODY, draw: kv('Артикул', String(item.article)) },
+    { h: SIZE_PT * 0.75, draw: kv('Размер', String(item.size), SIZE_PT) },
+    item.brand ? { h: BODY, draw: kv('Бренд', String(item.brand)) } : null,
+    { h: BODY, draw: y => { font(BODY); ctx.fillText(clip(SELLER_LINE, maxW), X, y); } },
   ].filter(Boolean);
   const total = rows.reduce((s, r) => s + r.h * PT, 0);
-  const gap = rows.length > 1 ? Math.min(2.2 * MM, ((g.textY1 - g.textY0) * MM - total) / (rows.length - 1)) : 0;
+  const gap = rows.length > 1 ? Math.min(2.4 * MM, ((g.textY1 - g.textY0) * MM - total) / (rows.length - 1)) : 0;
   let y = g.textY0 * MM;
   rows.forEach(r => { y += r.h * PT; r.draw(y); y += gap; });
+  // Разделитель перед штрихкодом.
+  if (item.barcode) ctx.fillRect(Math.round(2.5 * MM), Math.round(g.ruleY * MM), Math.round((LW - 5) * MM), Math.max(1, Math.round(0.15 * MM)));
   const layer = { key: 'kizText' + textLayerCache.size, png: cvs.toDataURL('image/png'), canvas: cvs };
   textLayerCache.set(key, layer);
   return layer;
@@ -285,35 +286,34 @@ async function drawKizPage(doc, item) {
   doc.addImage(layer.png, 'PNG', 0, 0, LW, LH, layer.key, 'FAST');
   doc.setFillColor(0, 0, 0); doc.setTextColor(0, 0, 0);
   matrix.forEach((row, y) => runs(row, (x, len) => doc.rect(g.dmX + x * g.m, g.dmY + y * g.m, len * g.m, g.m + 0.01, 'F')));
-  doc.setFont('helvetica', 'normal');
-  let pt = 4.8; doc.setFontSize(pt);
+  doc.setFont('helvetica', 'bold');
+  let pt = g.hriPt; doc.setFontSize(pt);
   while (pt > 3 && Math.max(...g.hri.map(t => doc.getTextWidth(t))) > g.dmSize + 1) { pt -= 0.2; doc.setFontSize(pt); }
-  g.hri.forEach((t, i) => doc.text(t, g.dmX + g.dmSize / 2, g.hriY + i * 1.8, { align: 'center' }));
+  g.hri.forEach((t, i) => doc.text(t, g.dmX + g.dmSize / 2, g.hriY + i * g.hriStep, { align: 'center' }));
   if (g.bits) {
     runs(g.bits, (x, len) => doc.rect(g.barX + x * g.bm, g.barY, len * g.bm, g.barH, 'F'));
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5);
-    doc.text(String(item.barcode), LW / 2, g.barY + g.barH + 2.9, { align: 'center' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+    doc.text(String(item.barcode), LW / 2, g.digitsY, { align: 'center' });
   }
 }
 // Та же этикетка картинкой — для образца на экране (геометрия общая с PDF).
 export async function renderKizLabelPNG(item) {
   const matrix = await kizMatrix(item.code);
   const g = kizGeometry(item, matrix);
-  const src = kizTextLayer(item, g).canvas, MM = src.width / LW;
+  const src = kizTextLayer(item, g).canvas, MM = src.width / LW, PT = MM * 25.4 / 72;
   const cvs = document.createElement('canvas'); cvs.width = src.width; cvs.height = src.height;
   const ctx = cvs.getContext('2d');
   ctx.drawImage(src, 0, 0); ctx.fillStyle = '#000';
   const R = (x, y, w, h) => ctx.fillRect(Math.round(x * MM), Math.round(y * MM), Math.round((x + w) * MM) - Math.round(x * MM), Math.round((y + h) * MM) - Math.round(y * MM));
   matrix.forEach((row, y) => runs(row, (x, len) => R(g.dmX + x * g.m, g.dmY + y * g.m, len * g.m, g.m)));
   ctx.textAlign = 'center';
-  let pt = 4.8; const PT = MM * 25.4 / 72;
-  ctx.font = `${pt * PT}px Arial`;
-  while (pt > 3 && Math.max(...g.hri.map(t => ctx.measureText(t).width)) > (g.dmSize + 1) * MM) { pt -= 0.2; ctx.font = `${pt * PT}px Arial`; }
-  g.hri.forEach((t, i) => ctx.fillText(t, (g.dmX + g.dmSize / 2) * MM, (g.hriY + i * 1.8) * MM));
+  let pt = g.hriPt; ctx.font = `bold ${pt * PT}px Arial`;
+  while (pt > 3 && Math.max(...g.hri.map(t => ctx.measureText(t).width)) > (g.dmSize + 1) * MM) { pt -= 0.2; ctx.font = `bold ${pt * PT}px Arial`; }
+  g.hri.forEach((t, i) => ctx.fillText(t, (g.dmX + g.dmSize / 2) * MM, (g.hriY + i * g.hriStep) * MM));
   if (g.bits) {
     runs(g.bits, (x, len) => R(g.barX + x * g.bm, g.barY, len * g.bm, g.barH));
-    ctx.font = `bold ${7.5 * PT}px Arial`;
-    ctx.fillText(String(item.barcode), LW / 2 * MM, (g.barY + g.barH + 2.9) * MM);
+    ctx.font = `bold ${7 * PT}px Arial`;
+    ctx.fillText(String(item.barcode), LW / 2 * MM, g.digitsY * MM);
   }
   return cvs.toDataURL('image/png');
 }
