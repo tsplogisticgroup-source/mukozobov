@@ -4,11 +4,12 @@
 // по коробам или по размерам, списываются при печати и могут быть возвращены в остаток.
 //
 // Хранение (Supabase KV):
-//   sklad:kiz_index        — сводка: { [артикул]: { brand, sizes: { [размер]: { gtin, free, printed } }, updatedAt } }
-//   sklad:kiz:<артикул>    — свободные коды: { sizes: { [размер]: { gtin, codes: [полный код с GS] } }, used: [ключ31…] }
+//   sklad:kiz_index        — сводка: { [артикул]: { brand, sizes: { [размер]: { gtin, gtins, free, printed } }, updatedAt } }
+//   sklad:kiz:<артикул>    — свободные коды: { sizes: { [размер]: { gtin, gtins, codes: [полный код с GS] } }, used: [ключ31…] }
 //   sklad:kiz_jobs         — журнал печати (новые сверху): [{ id, at, article, brand, count, returned, bySize }]
 //   sklad:kiz_job:<id>     — состав печати: { items: [{ size, gtin, barcode, code, returned }] }
 import React, { useState, useEffect, useMemo } from 'react';
+import { sizeGtins } from './kiz-gtins.js';
 
 export const KEY_KIZ_INDEX = 'sklad:kiz_index';
 const KEY_KIZ_JOBS = 'sklad:kiz_jobs';
@@ -130,7 +131,9 @@ export function parseKizFile(buf, { canonArticle, index, barcodeMap }) {
     if (sample.filter(r => /^\d{12,14}$/.test(String(r[c]).trim())).length >= Math.max(1, sample.length * 0.6)) bcCol = c;
   }
   const gtinOwner = {}; // GTIN → { article, size } из уже загруженного остатка
-  Object.entries(index || {}).forEach(([a, v]) => Object.entries(v.sizes || {}).forEach(([z, x]) => { if (x.gtin) gtinOwner[x.gtin] = { article: a, size: z }; }));
+  Object.entries(index || {}).forEach(([a, v]) => Object.entries(v.sizes || {}).forEach(([z, x]) => {
+    sizeGtins(x).forEach(g => { gtinOwner[g] = { article: a, size: z }; });
+  }));
   const out = [], errors = [];
   body.forEach((r, i) => {
     const k = parseKizCode(r[codeCol]);
@@ -400,7 +403,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
     try {
       const buf = await file.arrayBuffer();
       const { rows, errors } = parseKizFile(buf, { canonArticle, index, barcodeMap });
-      // Сверяем с уже загруженными кизами каждого артикула (дубли, GTIN размера).
+      // Сверяем дубли. У одного размера может быть несколько GTIN из разных партий.
       const byArt = {};
       rows.forEach(r => { (byArt[r.article] = byArt[r.article] || []).push(r); });
       const plan = [];
@@ -414,13 +417,11 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
         const card = wbCard(article, list[0].brand);
         list.forEach(r => {
           if (known.has(r.key) || seen.has(r.key)) { dup++; return; }
-          const cur = store.sizes[r.size] && store.sizes[r.size].gtin;
-          if (cur && cur !== r.gtin) { bad++; errors.push({ row: '', reason: `${article} р.${r.size}: другой GTIN (${r.gtin}), на остатке ${cur}`, value: r.key }); return; }
           seen.add(r.key);
           if (!sizes[r.size]) sizes[r.size] = { gtin: r.gtin, codes: [], barcode: barcodeFor(card, r.size) };
-          if (sizes[r.size].gtin !== r.gtin) { bad++; errors.push({ row: '', reason: `${article} р.${r.size}: в файле два разных GTIN`, value: r.key }); return; }
           sizes[r.size].codes.push(r.code);
         });
+        Object.values(sizes).forEach(s => { s.gtins = sizeGtins(s); });
         plan.push({ article, brand: list[0].brand, name: list[0].name, sizes, dup, bad, inCatalog: !!card,
           total: Object.values(sizes).reduce((s, x) => s + x.codes.length, 0) });
       }
@@ -444,7 +445,8 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
         Object.entries(p.sizes).forEach(([size, s]) => {
           if (!store.sizes[size]) store.sizes[size] = { gtin: s.gtin, codes: [] };
           store.sizes[size].codes.push(...s.codes);
-          if (s.barcode) gtinPairs.push([s.barcode, s.gtin]);
+          store.sizes[size].gtins = sizeGtins(store.sizes[size]);
+          if (s.barcode) store.sizes[size].gtins.forEach(g => gtinPairs.push([s.barcode, g]));
         });
         await kvSet(keyArt(p.article), store);
         idx[p.article] = indexEntry(p.article, store, { ...(idx[p.article] || {}), brand: p.brand || (idx[p.article] || {}).brand || '' });
@@ -461,7 +463,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
     const sizes = {};
     Object.entries(store.sizes).forEach(([size, s]) => {
       const printed = (prev.sizes && prev.sizes[size] && prev.sizes[size].printed) || 0;
-      sizes[size] = { gtin: s.gtin, free: s.codes.length, printed };
+      sizes[size] = { gtin: s.gtin, gtins: sizeGtins(s), free: s.codes.length, printed };
     });
     return { ...prev, sizes, updatedAt: new Date().toISOString() };
   }
@@ -510,7 +512,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
         const taken = s.codes.splice(0, n);
         store.used = [...(store.used || []), ...taken.map(c => c.slice(0, 31))];
         bySize[z] = n;
-        taken.forEach(code => items.push({ size: z, gtin: s.gtin, barcode: barcodeFor(printCard, z), code, name: printCard ? printCard.name : '', article: printArt, brand: printEntry.brand || (printCard ? printCard.brand : '') }));
+        taken.forEach(code => items.push({ size: z, gtin: parseKizCode(code).gtin, barcode: barcodeFor(printCard, z), code, name: printCard ? printCard.name : '', article: printArt, brand: printEntry.brand || (printCard ? printCard.brand : '') }));
       });
       const doc = await makeLabelsPdf(items, setBusy);
       setBusy('Списываю кизы…');
@@ -536,7 +538,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
       const has = z => store && store.sizes[z] && store.sizes[z].codes.length;
       const z = printSizes.find(x => (Number(qtys[x]) || 0) > 0 && has(x)) || printSizes.find(has);
       if (!z) { alert('Свободных кизов у артикула нет — образец показать не на чем.'); return; }
-      setSample(await renderKizLabelPNG({ size: z, gtin: store.sizes[z].gtin, barcode: barcodeFor(printCard, z), code: store.sizes[z].codes[0],
+      setSample(await renderKizLabelPNG({ size: z, gtin: parseKizCode(store.sizes[z].codes[0]).gtin, barcode: barcodeFor(printCard, z), code: store.sizes[z].codes[0],
         name: printCard ? printCard.name : '', article: printArt, brand: printEntry.brand || (printCard ? printCard.brand : '') }));
     } catch (err) { console.error(err); alert('Ошибка: ' + (err.message || err)); }
     finally { setBusy(''); }
@@ -546,7 +548,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
     try {
       const d = await kvGet(keyJob(job.id));
       const card = wbCard(job.article, job.brand);
-      const items = (d ? d.items : []).filter(it => !it.returned).map(it => ({ ...it, article: job.article, brand: job.brand, name: card ? card.name : '' }));
+      const items = (d ? d.items : []).filter(it => !it.returned).map(it => ({ ...it, gtin: parseKizCode(it.code).gtin, article: job.article, brand: job.brand, name: card ? card.name : '' }));
       if (!items.length) { alert('В этой печати не осталось кизов (все возвращены).'); return; }
       openPrint(await makeLabelsPdf(items, setBusy));
     } catch (err) { console.error(err); alert('Ошибка: ' + (err.message || err)); }
@@ -572,6 +574,7 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
         it.returned = true;
         if (!store.sizes[it.size]) store.sizes[it.size] = { gtin: it.gtin, codes: [] };
         store.sizes[it.size].codes.unshift(it.code);
+        store.sizes[it.size].gtins = sizeGtins(store.sizes[it.size]);
         back.push(it);
       });
       const keys = new Set(back.map(it => it.code.slice(0, 31)));
@@ -616,7 +619,8 @@ export function KizTab({ Section, ArticleCombobox, icons, labelArticles, gridVec
     <Section title="Загрузка кизов" icon={<Upload size={18} />} open collapsible={false}>
       <p style={{ fontSize: 13, color: 'var(--ink-soft)', marginTop: 0, marginBottom: 12 }}>
         Загрузи выгрузку из личного кабинета Честного Знака (xlsx или csv): артикул, размер и GTIN берутся из файла,
-        коды ложатся на остаток по артикулу и размеру. Дубли и уже напечатанные коды отбрасываются автоматически.
+        коды ложатся на остаток по артикулу и размеру. Для одного размера можно загрузить несколько GTIN.
+        Дубли и уже напечатанные коды отбрасываются автоматически.
       </p>
       <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 10, border: '1px dashed var(--line)', background: 'var(--paper)', fontSize: 13 }}>
         <div style={{ fontWeight: 600, marginBottom: 6 }}>Как передать файл с кизами</div>

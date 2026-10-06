@@ -1,6 +1,7 @@
 import { DUCK_VB, DUCK_PATH } from './duck.js';
 import { KizTab, parseKizCode } from './kiz.jsx';
 import { OzonTab } from './ozon.jsx';
+import { gtinValues, mergeGtinValues } from './kiz-gtins.js';
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -301,7 +302,7 @@ const KEY_GRIDS = 'sklad:grids';
 const KEY_BRANDS = 'sklad:brands'; // code -> присвоенный бренд артикула
 const KEY_FBS_ASSIGN = 'sklad:fbs_assignments'; // индекс заданий на сборку FBS
 const FBS_ASSIGN_PREFIX = 'sklad:fbs_assignment:'; // детали задания (по одному ключу на задание)
-const KEY_FBS_GTIN = 'sklad:fbs_gtin_map'; // баркод WB → GTIN Честного Знака (выученные соответствия)
+const KEY_FBS_GTIN = 'sklad:fbs_gtin_map'; // баркод WB → список GTIN Честного Знака (старые строки тоже читаются)
 const KEY_FBS_KIZ_USED = 'sklad:fbs_kiz_used'; // КИЗ (01+GTIN+21+серийный) → заказ, чтобы не использовать дважды
 // Сканер в режиме клавиатуры при РУССКОЙ раскладке печатает кириллицу вместо латиницы
 // (Честный Знак содержит буквы и символы). Переводим обратно по позиции клавиш.
@@ -2401,10 +2402,9 @@ function SkladLedger() {
   // Запоминаем «баркод WB → GTIN» после успешной сборки (для проверки пересорта).
   async function learnFbsGtin(barcode, gtin, force) {
     if (!barcode || !gtin) return;
-    if (fbsGtinMap[barcode] === gtin) return;
-    if (fbsGtinMap[barcode] && !force) return;
+    if (gtinValues(fbsGtinMap[barcode]).includes(gtin)) return;
     const m = await kvGet(KEY_FBS_GTIN, {});
-    const next = { ...(m && typeof m === 'object' ? m : {}), [barcode]: gtin };
+    const next = { ...(m && typeof m === 'object' ? m : {}), [barcode]: mergeGtinValues(m && m[barcode], gtin) };
     setFbsGtinMap(next);
     try { await window.storage.set(KEY_FBS_GTIN, JSON.stringify(next)); } catch (_) {}
   }
@@ -2413,7 +2413,11 @@ function SkladLedger() {
     const m = await kvGet(KEY_FBS_GTIN, {});
     const next = { ...(m && typeof m === 'object' ? m : {}) };
     let changed = 0;
-    (pairs || []).forEach(([barcode, gtin]) => { if (barcode && gtin && next[barcode] !== gtin) { next[barcode] = gtin; changed++; } });
+    (pairs || []).forEach(([barcode, gtin]) => {
+      if (barcode && gtin && !gtinValues(next[barcode]).includes(gtin)) {
+        next[barcode] = mergeGtinValues(next[barcode], gtin); changed++;
+      }
+    });
     if (!changed) return;
     setFbsGtinMap(next);
     try { await window.storage.set(KEY_FBS_GTIN, JSON.stringify(next)); } catch (_) {}
@@ -2443,16 +2447,16 @@ function SkladLedger() {
     if (opts.override !== value) {
       const bc = String(cur.barcode || '');
       const direct = /^\d{13}$/.test(bc) && k.gtin === '0' + bc; // баркод WB = GTIN — точное совпадение
-      if (!direct) {
+      const learned = gtinValues(fbsGtinMap[bc]);
+      if (!direct && !learned.includes(k.gtin)) {
         const otherDirect = Object.keys(barcodeIndex).find(b => b !== bc && /^\d{13}$/.test(b) && k.gtin === '0' + b);
-        const otherLearned = Object.keys(fbsGtinMap).find(b => b !== bc && fbsGtinMap[b] === k.gtin);
+        const otherLearned = Object.keys(fbsGtinMap).find(b => b !== bc && gtinValues(fbsGtinMap[b]).includes(k.gtin));
         const other = otherDirect || otherLearned;
         if (other) {
           const ob = barcodeIndex[other];
           return { ok: false, kind: 'gtin', kiz: k, text: `Честный Знак от ДРУГОГО товара: ${ob ? `${ob.code} р.${ob.size} (${ob.brand})` : 'баркод ' + other}, а собираем ${cur.code} р.${cur.size || '?'}. Проверь артикул и размер на коробке, возьми правильную пару.` };
         }
-        const learned = fbsGtinMap[bc];
-        if (learned && learned !== k.gtin) return { ok: false, kind: 'gtin', kiz: k, text: `GTIN ${k.gtin} не совпадает с этим товаром (для ${cur.code} р.${cur.size || '?'} раньше принимали GTIN ${learned}). Похоже на пересорт — проверь размер и артикул на коробке.` };
+        if (learned.length) return { ok: false, kind: 'gtin', kiz: k, text: `GTIN ${k.gtin} не совпадает с этим товаром (для ${cur.code} р.${cur.size || '?'} известны GTIN ${learned.join(', ')}). Похоже на пересорт — проверь размер и артикул на коробке.` };
       }
     }
     return { ok: true, kiz: k };
@@ -7091,4 +7095,3 @@ function SkladLedger() {
 // Раньше здесь был запуск приложения. Теперь компонент отдаём наружу —
 // его рендерит main.jsx через «ворота» входа (AuthGate).
 window.SkladLedger = SkladLedger;
-
