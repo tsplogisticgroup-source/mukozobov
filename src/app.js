@@ -2,6 +2,7 @@ import { DUCK_VB, DUCK_PATH } from './duck.js';
 import { KizTab, parseKizCode } from './kiz.jsx';
 import { OzonTab } from './ozon.jsx';
 import { gtinValues, mergeGtinValues } from './kiz-gtins.js';
+import { catalogForPrinting } from './print-catalog.js';
 function ownKeys(e, r) { var t = Object.keys(e); if (Object.getOwnPropertySymbols) { var o = Object.getOwnPropertySymbols(e); r && (o = o.filter(function (r) { return Object.getOwnPropertyDescriptor(e, r).enumerable; })), t.push.apply(t, o); } return t; }
 function _objectSpread(e) { for (var r = 1; r < arguments.length; r++) { var t = null != arguments[r] ? arguments[r] : {}; r % 2 ? ownKeys(Object(t), !0).forEach(function (r) { _defineProperty(e, r, t[r]); }) : Object.getOwnPropertyDescriptors ? Object.defineProperties(e, Object.getOwnPropertyDescriptors(t)) : ownKeys(Object(t)).forEach(function (r) { Object.defineProperty(e, r, Object.getOwnPropertyDescriptor(t, r)); }); } return e; }
 function _defineProperty(e, r, t) { return (r = _toPropertyKey(r)) in e ? Object.defineProperty(e, r, { value: t, enumerable: !0, configurable: !0, writable: !0 }) : e[r] = t, e; }
@@ -3427,8 +3428,9 @@ function SkladLedger() {
   // «Скачать для работы» берут всё из одного сохранённого каталога.
   useEffect(() => {
     const out = {};
-    for (const code of Object.keys(catalog)) {
-      const c = catalog[code];
+    const printCatalog = catalogForPrinting(catalog);
+    for (const code of Object.keys(printCatalog)) {
+      const c = printCatalog[code];
       const stock = summary.find(s => s.article === canonArticle(code));
       // Группируем карточки по бренду: у одного кода может быть несколько карточек
       // (напр. 94-1 под LOFERS и под «Носим сутками») — каждая становится отдельной
